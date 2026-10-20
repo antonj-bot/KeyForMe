@@ -6,10 +6,11 @@ activating the unit tab, then using visible controls. This avoids hard-coding
 """
 
 FRAME_SELECTOR = "#formIframe"
+UNIT_SECTION = "#section-page-base-owner-02"
 
 STRUCTURE = {
-    "add_unit_button": {"kind": "role", "role": "button", "name": "Add Trailer"},
-    "delete_unit_button": {"kind": "title", "title": "Delete Vehicle/Party"},
+    "add_unit_button": "#section-page-base-owner-02 div.st-nav-add",
+    "delete_unit_button": "#formDeleteVehicle",
 }
 
 INCIDENT = {

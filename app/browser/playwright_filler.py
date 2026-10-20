@@ -1,5 +1,8 @@
 from playwright.sync_api import Page, FrameLocator, expect
-from app.browser.field_mapping import FRAME_SELECTOR, STRUCTURE, INCIDENT, OWNER, DRIVER, VEHICLE, RADIO_ROWS
+from app.browser.field_mapping import (
+    FRAME_SELECTOR, UNIT_SECTION, STRUCTURE,
+    INCIDENT, OWNER, DRIVER, VEHICLE, RADIO_ROWS,
+)
 
 
 def form(page: Page) -> FrameLocator:
@@ -14,10 +17,18 @@ def fill_if_present(scope, selector: str, value, index: int = 0) -> None:
         control.fill(str(value))
 
 
-def check_if(scope, selector: str, enabled: bool, index: int = 0) -> None:
+def check_if(scope, selector: str, enabled: bool, index: int = 0) -> bool:
+    """Try to set a checkbox. Returns False instead of crashing if the site rejects it."""
     control = scope.locator(selector).nth(index)
-    if control.count():
-        control.set_checked(bool(enabled))
+    if not control.count():
+        return False
+    try:
+        if control.is_checked() != enabled:
+            control.click()
+            control.page.wait_for_timeout(300)  # let the site's JS react
+        return control.is_checked() == enabled
+    except Exception:
+        return False
 
 
 def select_radio_row(scope, row_name: str, value: str) -> None:
@@ -26,19 +37,6 @@ def select_radio_row(scope, row_name: str, value: str) -> None:
     if label:
         scope.get_by_role("row", name=row_name).get_by_label(label).check()
 
-
-def add_units(page: Page, required: int) -> None:
-    """The site's Add Trailer action clones Unit 1 into another unit.
-
-    We use the clone only to create Unit 2/3, then overwrite every mapped field.
-    """
-    f = form(page)
-    for _ in range(max(0, required - 1)):
-        f.get_by_role("button", name="Add Trailer").click()
-
-
-def activate_unit(page: Page, unit_number: int) -> None:
-    form(page).get_by_role("link", name=str(unit_number), exact=True).click()
 
 
 def fill_incident(page: Page, incident: dict) -> None:
@@ -49,38 +47,32 @@ def fill_incident(page: Page, incident: dict) -> None:
             fill_if_present(f, selector, value)
 
 
+CHECKBOX_FIELDS = {"same_as_driver_address", "same_as_owner"}
+
+
 def fill_person(scope, mapping: dict, data: dict, person_index: int) -> None:
+    # Text fields first, so the address exists before any "same as" checkbox.
     for key, value in data.items():
         selector = mapping.get(key)
-        if not selector:
+        if not selector or key in CHECKBOX_FIELDS or key == "cited":
             continue
-        if key in {"same_as_driver_address", "same_as_owner"}:
-            check_if(scope, selector, bool(value), person_index)
-        elif key == "cited":
-            cited_selector = mapping.get("cited_yes" if value == "YES" else "cited_no" if value == "NO" else "")
-            if cited_selector:
-                check_if(scope, cited_selector, True)
-        else:
-            fill_if_present(scope, selector, value, person_index)
+        fill_if_present(scope, selector, value, person_index)
+
+    # Citation radio (driver only)
+    cited = data.get("cited")
+    if cited in ("YES", "NO"):
+        cited_selector = mapping.get("cited_yes" if cited == "YES" else "cited_no")
+        if cited_selector:
+            check_if(scope, cited_selector, True)
+
+    # "Same as" checkboxes last. The address is already typed, so a rejected click is harmless.
+    for key in CHECKBOX_FIELDS:
+        if data.get(key) and mapping.get(key):
+            if not check_if(scope, mapping[key], True, person_index):
+                print(f"  Note: could not tick '{key}'; the address was typed in instead.")
 
 
-def fill_unit(page: Page, unit_number: int, unit: dict) -> None:
-    activate_unit(page, unit_number)
-    f = form(page)
 
-    # Within an active unit, the first visible Person_* set is Owner and second is Driver.
-    fill_person(f, OWNER, unit["owner"], person_index=0)
-    fill_person(f, DRIVER, unit["driver"], person_index=1)
-
-    for key, value in unit["vehicle"].items():
-        if key == "vehicle_towed":
-            select_radio_row(f, RADIO_ROWS["vehicle_towed"], value)
-        elif key == "airbag_deployed":
-            select_radio_row(f, RADIO_ROWS["airbag_deployed"], value)
-        else:
-            selector = VEHICLE.get(key)
-            if selector:
-                fill_if_present(f, selector, value)
 
 
 def fill_keying_form(page: Page, payload: dict) -> None:
@@ -89,3 +81,60 @@ def fill_keying_form(page: Page, payload: dict) -> None:
     add_units(page, len(payload["units"]))
     for unit_number, unit in enumerate(payload["units"], start=1):
         fill_unit(page, unit_number, unit)
+
+def unit_section(page: Page):
+    return form(page).locator(UNIT_SECTION)
+
+
+def count_unit_tabs(section) -> int:
+    hrefs = section.locator("a.ui-tabs-anchor").evaluate_all(
+        "els => els.map(e => e.getAttribute('href'))"
+    )
+    return len({h for h in hrefs if h})
+
+
+def add_units(page: Page, required: int) -> None:
+    section = unit_section(page)
+    add_button = form(page).locator(STRUCTURE["add_unit_button"]).first
+
+    while count_unit_tabs(section) < required:
+        before = count_unit_tabs(section)
+        add_button.click()
+        for _ in range(50):
+            if count_unit_tabs(section) > before:
+                break
+            page.wait_for_timeout(200)
+        else:
+            raise RuntimeError(f"Clicked + but no new unit appeared (still {before}).")
+        print(f"Unit {before + 1} added.")
+
+
+def activate_unit(page: Page, unit_number: int) -> None:
+    section = unit_section(page)
+    tab = section.locator(f"a.ui-tabs-anchor[href='#tabs-{unit_number}']").first
+    if not tab.count():
+        found = section.locator("a.ui-tabs-anchor").evaluate_all(
+            "els => els.map(e => `${e.getAttribute('href')} [${e.textContent.trim()}]`)"
+        )
+        raise RuntimeError(f"Unit {unit_number} tab not found. Unit tabs: {found}")
+    tab.click()
+    section.locator(f"#tabs-{unit_number}").first.wait_for(
+        state="visible", timeout=10_000
+    )
+
+
+def fill_unit(page: Page, unit_number: int, unit: dict) -> None:
+    activate_unit(page, unit_number)
+    section = unit_section(page)
+
+    # Search only the vehicle-unit section so Passenger fields aren't matched.
+    fill_person(section, DRIVER, unit["driver"], person_index=1)
+    fill_person(section, OWNER, unit["owner"], person_index=0)
+
+    for key, value in unit["vehicle"].items():
+        if key in RADIO_ROWS:
+            select_radio_row(section, RADIO_ROWS[key], value)
+        else:
+            selector = VEHICLE.get(key)
+            if selector:
+                fill_if_present(section, selector, value)
