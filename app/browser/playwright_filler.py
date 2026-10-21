@@ -5,7 +5,7 @@ from playwright.sync_api import Page
 
 from app.browser.field_mapping import (
     DRIVER, FRAME_SELECTOR, INCIDENT, OTHER, OTHER_SECTION, OWNER,
-    PERSON_TYPE_CODES, RADIO_ROWS, STRUCTURE, UNIT_SECTION, VEHICLE,
+    PERSON_TYPE_CODES, RADIO_ROWS, STRUCTURE, UNIT_SECTION, VEHICLE, VIN_POPUP_OK
 )
 
 CHECKBOX_FIELDS = ("same_as_driver_address", "same_as_owner")
@@ -175,21 +175,102 @@ def fill_person(scope, mapping: dict, data: dict, person: str) -> None:
 
 
 # ---------------- vehicle + VIN popup
+def debug_vin_popup(page: Page):
+    print("\n===== VIN POPUP DEBUG =====")
 
-def click_popup_ok(page: Page, timeout_s: float = 4.0) -> bool:
-    end = time.monotonic() + timeout_s
-    while time.monotonic() < end:
-        if _dialog["seen"]:
-            return True
-        for scope in (form(page), page):
-            for button in scope.get_by_role("button", name="OK", exact=True).all():
+    for browser_page in page.context.pages:
+
+        if browser_page.is_closed():
+            continue
+
+        print(f"PAGE: {browser_page.url}")
+
+        for frame in browser_page.frames:
+
+            try:
+                dialogs = frame.locator(
+                    "div.ui-dialog"
+                )
+
+                buttons = frame.locator(
+                    "button"
+                )
+
+                print(
+                    f"FRAME: {frame.url}"
+                )
+
+                print(
+                    f"Dialogs: {dialogs.count()}"
+                )
+
+                print(
+                    f"Buttons: {buttons.count()}"
+                )
+
+                for button in buttons.all():
+
+                    if not button.is_visible():
+                        continue
+
+                    print({
+                        "text": button.inner_text(),
+                        "id": button.get_attribute("id"),
+                        "class": button.get_attribute("class"),
+                    })
+
+            except Exception:
+                continue
+            
+        
+def click_popup_ok(page: Page, timeout_s: float = 8.0) -> bool:
+    """
+    Find the VIN popup OK button across all browser frames.
+
+    Handles:
+    - Main webpage
+    - #formIframe
+    - Nested iframes
+    - Other frames in the same browser context
+    """
+
+    deadline = time.monotonic() + timeout_s
+
+    while time.monotonic() < deadline:
+
+        for browser_page in page.context.pages:
+
+            if browser_page.is_closed():
+                continue
+
+            for frame in browser_page.frames:
+
                 try:
-                    if button.is_visible():
-                        button.click()
-                        return True
+                    button = frame.locator(
+                        VIN_POPUP_OK
+                    ).first
+
+                    if not button.count():
+                        continue
+
+                    if not button.is_visible():
+                        continue
+
+                    button.click(timeout=2000)
+
+                    print(
+                        f"VIN popup OK clicked in frame: "
+                        f"{frame.url}"
+                    )
+
+                    return True
+
                 except Exception:
-                    pass
+                    continue
+
         page.wait_for_timeout(200)
+
+    print("WARNING: VIN popup OK button not found.")
     return False
 
 
@@ -219,10 +300,26 @@ def fill_vehicle(page: Page, section, vehicle: dict) -> None:
             print(f"  NOTE: VIN '{vin}' is keyed as printed, but the form will reject it "
                   "(must be 17 characters, no I/O/Q). Check the report.")
         if click_popup_ok(page):
-            decoded = field_has_value(section, VEHICLE["year"])
-            print("  VIN popup: OK clicked" + ("" if decoded else ", but year stayed blank"))
+            decoded = field_has_value(
+                section,
+                VEHICLE["year"],
+            )
+
+            print(
+                "  VIN popup: OK clicked"
+                + ("" if decoded else ", but year stayed blank")
+            )
+
         else:
-            print("  Note: no VIN popup appeared; keying year/make/model from the report.")
+            print("  WARNING: VIN popup OK button not found.")
+
+            # Show all frames and visible buttons for debugging.
+            debug_vin_popup(page)
+
+            print(
+                "  Continuing with year, make, and model "
+                "from the police report."
+            )
 
     for key, value in vehicle.items():
         if key == "vin" or (decoded and key in YEAR_MAKE_MODEL):

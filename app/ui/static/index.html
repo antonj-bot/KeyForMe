@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KeyForMe</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="brand"><span class="logo">K</span><div><h1>KeyForMe</h1><p>Police report automation</p></div><span class="badge">LOCAL</span></header>
+    <section class="card hero">
+      <div class="eyebrow">AUTOMATION CONTROL</div>
+      <h2>Ready when you are.</h2>
+      <p>Open a report in the eCrash Chrome window, then start extraction here. Review all keyed fields before saving.</p>
+      <div class="statusline"><span id="dot" class="dot"></span><span id="status">Connecting…</span></div>
+      <button id="extract" disabled>Extract <span aria-hidden="true">→</span></button>
+      <div class="meta"><div><span>REPORT TYPE</span><strong id="report">—</strong></div><div><span>VEHICLE UNITS</span><strong id="units">—</strong></div><div><span>WARNINGS</span><strong id="warnings">0</strong></div></div>
+    </section>
+    <section class="card logs"><div class="loghead"><div><h3>Activity logs</h3><p>Operational updates only; no report personal data.</p></div><button id="clear" class="secondary">Clear view</button></div><div id="loglist" role="log" aria-live="polite"><div class="empty">Waiting for application…</div></div></section>
+    <footer>Local session • No automatic Save or Submit</footer>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

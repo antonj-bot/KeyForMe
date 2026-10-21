@@ -113,6 +113,10 @@ PERSON_TYPE_CODES = {
 def _v(name: str) -> str:
     return f"[id^='Vehicle_{name}-']:visible"
 
+VIN_POPUP_OK = (
+    "div.ui-dialog.ui-front.ui-dialog-buttons "
+    "div.ui-dialog-buttonpane button:first-child"
+)
 
 VEHICLE = {
     "tag_number": _v("LicensePlate"),
