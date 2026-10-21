@@ -1,7 +1,12 @@
 """NM mapping. Owner details intentionally include phone (unlike CA)."""
+
+
+
 from __future__ import annotations
 import re
 from app.nm_models import NMReport
+
+from app.keying.nm_dropdowns import apply_nm_dropdowns
 
 
 def phone(raw: str | None) -> str:
@@ -24,13 +29,96 @@ def address(raw: str | None) -> tuple[str, str]:
     m = re.search(r"[\s,]+((?:APT|APARTMENT|UNIT|STE|SUITE|SPC|SPACE)\.?\s*#?\s*[A-Z0-9-]+)$", t, re.I)
     return (t[:m.start()].strip(), m[1]) if m else (t, "")
 
+import re
+from datetime import datetime
+
+
+def nm_driver_license(raw) -> str:
+    """Ignore dash-only or nonnumeric license placeholders."""
+    text = str(raw or "").strip()
+
+    return text if re.search(r"\d", text) else ""
+
+
+def nm_dob(raw) -> str:
+    """Only key complete, valid dates."""
+    text = date(raw)
+
+    if not re.fullmatch(r"\d{2}/\d{2}/\d{4}", text):
+        return ""
+
+    try:
+        datetime.strptime(text, "%m/%d/%Y")
+    except ValueError:
+        return ""
+
+    return text
+
+
+def nm_airbag(raw) -> str:
+    """Apply the NM airbag rule."""
+    value = str(raw or "").strip().upper()
+
+    if not value:
+        return ""
+
+    if value in {"N", "NA", "N/A"}:
+        return "NO"
+
+    if value.isalpha():
+        return "YES"
+
+    return ""
+
+def nm_intersection_type(raw) -> str:
+    """Map recognized intersection descriptions to NM form text."""
+    value = " ".join(str(raw or "").upper().split())
+
+    # Normalize separators for matching only.
+    value = re.sub(r"[-_]+", " ", value)
+    value = " ".join(value.split())
+
+    mappings = {
+        # Five-Point or More
+        "FIVE POINT OR MORE": "FIVE-POINT OR MORE",
+        "5 POINT OR MORE": "FIVE-POINT OR MORE",
+
+        # Four-Way
+        "FOUR WAY": "FOUR-WAY",
+        "FOUR WAY INTERSECTION": "FOUR-WAY",
+        "4 WAY": "FOUR-WAY",
+        "4 WAY INTERSECTION": "FOUR-WAY",
+
+        # L Int
+        "L INT": "L INT",
+        "L INTERSECTION": "L INT",
+
+        # Not an Intersection
+        "NOT AN INTERSECTION": "NOT AN INTERSECTION",
+
+        # Roundabout
+        "ROUNDABOUT": "ROUNDABOUT",
+
+        # T Int
+        "T INT": "T INT",
+        "T INTERSECTION": "T INT",
+
+        # Traffic Circle
+        "TRAFFIC CIRCLE": "TRAFFIC CIRCLE",
+
+        # Y Int
+        "Y INT": "Y INT",
+        "Y INTERSECTION": "Y INT",
+    }
+
+    return mappings.get(value, "")
 
 def map_nm(report: NMReport) -> dict:
     incident = report.incident
     payload = {
         "incident": {
-            "report_identifier_1": incident.crash_report_number or "",
-            "report_identifier_2": incident.case_number or "",
+            "report_identifier_1": incident.case_number or "",
+            "report_identifier_2": incident.crash_report_number or "",
             "incident_date": date(incident.crash_date),
             "time_2400": clock(incident.crash_time),
             "incident_state": "NM",
@@ -45,6 +133,11 @@ def map_nm(report: NMReport) -> dict:
             "type_of_collision": incident.manner_of_impact or "",
             "reporting_district": incident.reporting_district or "",
             "officer_id": incident.officer_id or "",
+            "first_harmful_event": incident.first_harmful_event or "",
+            "district": incident.district or incident.reporting_district or "",
+            "intersection_type": nm_intersection_type(
+                incident.intersection_type
+            ),
         },
         "units": [],
         "other_parties": [],
@@ -59,17 +152,21 @@ def map_nm(report: NMReport) -> dict:
                 "first_name": u.driver_first_name or "",
                 "middle_name": u.driver_middle_name or "",
                 "last_name": u.driver_last_name or "",
+                "sex": u.driver_sex or "",
                 "address_1": driver1, "address_2": driver2,
                 "city": u.driver_city or "", "state": u.driver_state or "",
                 "zip_code": u.driver_zip or "", "home_phone": phone(u.driver_phone),
-                "date_of_birth": date(u.driver_dob),
-                "drivers_license": u.driver_license or "",
+                "date_of_birth": nm_dob(u.driver_dob),
+                "drivers_license": nm_driver_license(u.driver_license),
                 "drivers_license_state": u.driver_license_state or "",
                 "injury_code": u.driver_injury_code or "",
                 "sobriety": u.driver_sobriety or "",
                 "ejected": u.driver_ejected or "",
                 "safety_equipment": u.driver_safety_equipment or "",
                 "driver_actions": u.driver_actions or "",
+                "physical_condition": u.driver_physical_condition or "",
+                "seating_position": u.driver_seating_position or "",
+                "op_code": u.driver_op_code or "",
             },
             "owner": {
                 "first_name": "" if u.owner_company_name else (u.owner_first_name or ""),
@@ -89,6 +186,16 @@ def map_nm(report: NMReport) -> dict:
                 "speed_limit": u.posted_speed or "",
                 "vehicle_towed": u.towed or "",
                 "damage_extent": u.damage_severity or "",
+                "airbag_deployed": nm_airbag(u.airbag_code),
+                "body_style": u.body_style or "",
+                "road_condition": u.unit_road_condition or "",
+                "traffic_control": u.unit_traffic_control or "",
+                "road_design": u.road_design or "",
+                "apparent_contributing_factors": u.apparent_contributing_factors or "",
+                "sequence_first": u.sequence_first or "",
+                "sequence_second": u.sequence_second or "",
+                "sequence_third": u.sequence_third or "",
+                "sequence_fourth": u.sequence_fourth or "",
             },
         })
-    return payload
+    return apply_nm_dropdowns(payload)

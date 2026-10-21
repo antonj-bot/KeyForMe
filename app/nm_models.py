@@ -20,6 +20,8 @@ class NMIncident(BaseModel):
     manner_of_impact: str | None = None
     officer_id: str | None = None
     reporting_district: str | None = None
+    first_harmful_event: str | None = None
+    district: str | None = None
 
 
 class NMUnit(BaseModel):
@@ -62,6 +64,23 @@ class NMUnit(BaseModel):
     towed: str | None = None
     damage_severity: str | None = None
     driver_actions: str | None = None
+    driver_sex: str | None = None
+    driver_physical_condition: str | None = None
+    driver_seating_position: str | None = None
+    driver_op_code: str | None = None
+
+    airbag_code: str | None = None
+    body_style: str | None = None
+    unit_road_condition: str | None = None
+    unit_traffic_control: str | None = None
+    road_design: str | None = None
+
+    apparent_contributing_factors: str | None = None
+
+    sequence_first: str | None = None
+    sequence_second: str | None = None
+    sequence_third: str | None = None
+    sequence_fourth: str | None = None
 
 
 class NMPageExtraction(BaseModel):
@@ -74,3 +93,7 @@ class NMReport(BaseModel):
     incident: NMIncident
     units: list[NMUnit]
     warnings: list[str] = Field(default_factory=list)
+
+class NMConclusion(BaseModel):
+    district: str | None = None
+    officer_id: str | None = None

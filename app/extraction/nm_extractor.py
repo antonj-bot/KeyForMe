@@ -18,6 +18,7 @@ from app.nm_models import (
     NMPageExtraction,
     NMReport,
     NMUnit,
+    NMConclusion,
 )
 
 
@@ -27,6 +28,28 @@ KEY_WHAT_YOU_SEE = (
     "VIN characters, and insurance-carrier spelling. Never correct, normalize, "
     "guess, or invent source values. Return null when a value is blank or "
     "unreadable. Do not copy values between traffic units."
+)
+
+NM_EXTRACTION_RULES = (
+    "Extract the case number separately from the crash report number. "
+    "Read each field from its printed label. "
+
+    "Extract First Harmful Event, intersection type, "
+    "driver sex, injury code, seating position, OP code, "
+    "ejection, airbag deployment code, and body style. "
+
+    "Extract driver sobriety, physical condition, "
+    "driver actions, road condition, traffic control, "
+    "road design, and apparent contributing factors. "
+
+    "Read Sequence of Events FIRST, SECOND, THIRD, "
+    "and FOURTH separately. "
+
+    "Never confuse Sequence of Events codes with Road Design. "
+    "Preserve report codes exactly, including the letter O. "
+
+    "Do not infer missing dates or driver's license numbers. "
+    "Preserve all VIN characters exactly as printed. "
 )
 
 
@@ -74,10 +97,58 @@ PAGES_2_AND_3_PROMPT = (
 
     "For VIN, copy every printed character exactly. "
     "For insurance company and policy number, preserve exact spelling. "
-
+    
     + KEY_WHAT_YOU_SEE
+    
 )
 
+# Apply additional NM extraction instructions
+PAGE_1_PROMPT += NM_EXTRACTION_RULES
+
+PAGE_1_PROMPT += (
+    "IMPORTANT FIELD DISTINCTIONS: "
+
+    "Intersection Type must come only from the field "
+    "explicitly labeled INTERSECTION TYPE. "
+
+    "Do not use Manner of Impact, crash configuration, "
+    "or INTERSECTING PATH (T-BONE) as Intersection Type. "
+
+    "First Harmful Event must come only from its "
+    "corresponding labeled field. "
+
+    "Do not use Sequence of Events codes such as MVT "
+    "as First Harmful Event. "
+
+    "Preserve the exact printed values. "
+)
+PAGES_2_AND_3_PROMPT += NM_EXTRACTION_RULES
+
+PAGES_2_AND_3_PROMPT += (
+    "CONTINUATION PAGE RESPONSIBILITIES: Extract Traffic Unit 01 continuation "
+    "and Traffic Unit 02 details using the printed unit headings. "
+    "Return incident containing ONLY intersection_type, weather, and lighting, "
+    "read from their explicitly labeled fields in the Condition Information "
+    "sections. Leave all other incident fields null. "
+    "If these sections disagree on any of the three fields, return null for "
+    "that field and report the disagreement in warnings; never guess. "
+    "Return null for blank or unreadable values. "
+    "INTERSECTING PATH (T-BONE) is crash configuration, not Intersection Type. "
+    "MVT is a Sequence of Events code, not First Harmful Event. "
+)
+
+
+PAGE_4_PROMPT = (
+    "This is page 4 of a New Mexico Uniform Crash Report SH 10074. "
+    "Extract ONLY district and officer_id from the CONCLUSION section. "
+    "Read district from the field labeled District. "
+    "Read officer_id from the field labeled ID Number. "
+    "Do not confuse District with Agency, Rank, Case Number, "
+    "or Crash Report Number. "
+    "Do not extract vehicle or driver information. "
+    "Preserve values exactly as printed. "
+    "Return null for blank or unreadable fields."
+)
 
 def _image(page, dpi: int = 180) -> str:
     pix = page.get_pixmap(
@@ -100,7 +171,8 @@ def _extract_images(
     images: list[str],
     prompt: str,
     model: str,
-) -> NMPageExtraction:
+    schema=NMPageExtraction,
+):
     # Delayed import lets mapping unit tests run without importing OpenAI.
     from openai import OpenAI
 
@@ -140,7 +212,7 @@ def _extract_images(
                 "content": content,
             },
         ],
-        text_format=NMPageExtraction,
+        text_format=schema,
     )
 
     result = response.output_parsed
@@ -173,6 +245,7 @@ def _merge_fields(
         ):
             warnings.append(
                 f"{label}: conflicting readings for {field}; "
+                f"first={old_value!r}, second={new_value!r}; "
                 "manual review required."
             )
 
@@ -241,30 +314,22 @@ def extract_nm(
     pdf_path: Path,
     model: str = "gpt-6-luna",
 ) -> NMReport:
+
     with pymupdf.open(pdf_path) as pdf:
-        if len(pdf) < 3:
+
+        if len(pdf) < 4:
             raise ValueError(
-                "Expected at least three pages in the NM report."
+                "Expected at least four pages in this NM report."
             )
 
-        page_1_image = _image(
-            pdf.load_page(0),
-        )
+        page_1_image = _image(pdf.load_page(0))
+        page_2_image = _image(pdf.load_page(1))
+        page_3_image = _image(pdf.load_page(2))
+        page_4_image = _image(pdf.load_page(3))
 
-        page_2_image = _image(
-            pdf.load_page(1),
-        )
+    with ThreadPoolExecutor(max_workers=3) as pool:
 
-        page_3_image = _image(
-            pdf.load_page(2),
-        )
-
-    # Two API requests run simultaneously:
-    # 1. Page 1 and Unit 1
-    # 2. Pages 2-3 together, preserving Unit 2 continuation context
-    with ThreadPoolExecutor(
-        max_workers=2,
-    ) as pool:
+        # Page 1: Incident and Unit 1
         page_1_future = pool.submit(
             _extract_images,
             [page_1_image],
@@ -272,22 +337,59 @@ def extract_nm(
             model,
         )
 
+        # Pages 2-3: Unit 1 continuation and Unit 2
         pages_2_3_future = pool.submit(
             _extract_images,
-            [
-                page_2_image,
-                page_3_image,
-            ],
+            [page_2_image, page_3_image],
             PAGES_2_AND_3_PROMPT,
             model,
         )
 
+        # Page 4: District and Officer ID
+        page_4_future = pool.submit(
+            _extract_images,
+            [page_4_image],
+            PAGE_4_PROMPT,
+            model,
+            NMConclusion,
+        )
+
         page_1_result = page_1_future.result()
         pages_2_3_result = pages_2_3_future.result()
+        conclusion = page_4_future.result()
 
-    return merge_pages(
-        [
-            page_1_result,
-            pages_2_3_result,
-        ]
+    # Preserve approved condition fields without accepting unrelated
+    # incident fields from continuation pages.
+    continuation_incident = pages_2_3_result.incident
+    pages_2_3_result.incident = NMIncident(
+        intersection_type=(
+            continuation_incident.intersection_type
+            if continuation_incident is not None else None
+        ),
+        weather=(
+            continuation_incident.weather
+            if continuation_incident is not None else None
+        ),
+        lighting=(
+            continuation_incident.lighting
+            if continuation_incident is not None else None
+        ),
     )
+
+    # Intersection Type belongs to the continuation condition sections.
+    # Retain page 1 Weather/Lighting so genuine conflicts remain visible.
+    if page_1_result.incident is not None:
+        page_1_result.incident.intersection_type = None
+
+    report = merge_pages([
+        page_1_result,
+        pages_2_3_result,
+    ])
+
+    if conclusion.district:
+        report.incident.district = conclusion.district
+
+    if conclusion.officer_id:
+        report.incident.officer_id = conclusion.officer_id
+
+    return report

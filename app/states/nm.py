@@ -8,7 +8,18 @@ NAME = "New Mexico SH 10074"
 
 def extract(pdf_path: Path, model: str) -> dict:
     report = extract_nm(pdf_path, model)
-    return map_nm(report)
+
+    print("\n===== RAW INCIDENT VALUES =====")
+    print("Weather:", repr(report.incident.weather))
+    print("Lighting:", repr(report.incident.lighting))
+
+    payload = map_nm(report)
+
+    print("\n===== MAPPED INCIDENT VALUES =====")
+    print("Weather:", repr(payload["incident"].get("weather")))
+    print("Lighting:", repr(payload["incident"].get("lighting")))
+
+    return payload
 
 
 def fill(page, payload: dict) -> None:

@@ -9,3 +9,7 @@ mock/
 pdfs/
 output/
 app_backup/
+recorded_*.py
+recorded_*.txt
+# Local backup files
+*.bak
