@@ -50,6 +50,14 @@ NM_EXTRACTION_RULES = (
 
     "Do not infer missing dates or driver's license numbers. "
     "Preserve all VIN characters exactly as printed. "
+    
+    "When multiple weather conditions or apparent contributing "
+    "factors are explicitly marked, separate the selected option "
+    "labels with a semicolon (;), not a comma. "
+    "Preserve commas within a single option label, such as "
+    "'BLOWING SAND, SOIL, DIRT'. "
+    "Include only explicitly selected or printed values; "
+    "do not infer additional conditions from the narrative. "
 )
 
 

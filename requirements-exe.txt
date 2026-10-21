@@ -1,0 +1,4 @@
+# Install into the existing working KeyForMe venv; does not replace requirements.txt.
+keyring>=25,<26
+pyinstaller>=6,<7
+pyinstaller-hooks-contrib

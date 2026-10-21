@@ -162,6 +162,24 @@ INTERSECTION.update({
     "Y-INTERSECTION": "Y INT", "Y INTERSECTION": "Y INT",
 })
 FACTORS["NO DRIVER ERROR"] = "OTHER NO DRIVER ERROR"
+# Explicitly recognized formatting variations.
+# Do not split all commas: some option labels contain commas.
+
+WEATHER.update({
+    "BLOWING SAND, SOIL, DIRT, RAINING":
+        "BLOWING SAND, SOIL, DIRT;RAINING",
+})
+
+LIGHTING.update({
+    "DARK LIGHTED": "DARK-LIGHTED",
+    "DARK NOT LIGHTED": "DARK-NOT LIGHTED",
+    "DARK UNKNOWN LIGHTING": "DARK-UNKNOWN LIGHTING",
+})
+
+FACTORS.update({
+    "AVOID NO CONTACT - OTHER, WEATHER CONDITIONS":
+        "AVOID NO CONTACT - OTHER;WEATHER CONDITIONS",
+})
 NM_DROPDOWNS = {
     "weather": WEATHER, "first_harmful_event": FHE, "lighting": LIGHTING,
     "intersection_type": INTERSECTION, "injury_code": INJURY,
@@ -186,7 +204,10 @@ def nm_dropdown_value(field, raw, warnings=None):
     for part in parts:
         if part not in mapping:
             if warnings is not None:
-                warnings.append(f"NM {field}: unrecognized option; entire field left blank.")
+                warnings.append(
+                    f"NM {field}: unrecognized option {part!r}; "
+                    "entire field left blank."
+                )
             return ""
         if mapping[part] not in result:
             result.append(mapping[part])
