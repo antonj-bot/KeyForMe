@@ -1,7 +1,11 @@
 .env
+.venv/
 __pycache__/
 *.pyc
-output/
-temp/
-auth_state.json
+auth.json
+recorded_*.py
+recorded_*.txt
+mock/
 pdfs/
+output/
+app_backup/

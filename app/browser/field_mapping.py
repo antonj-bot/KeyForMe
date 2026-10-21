@@ -1,16 +1,18 @@
-"""CA keying form locators derived from Playwright recording.
+# KeyForMe fix5
+"""CA keying form selectors (from the Codegen recording).
 
-All form controls live inside #formIframe. Repeated units are handled by first
-activating the unit tab, then using visible controls. This avoids hard-coding
--t1, -t2, -t3 suffixes that change as units/people are added.
+Everything lives inside #formIframe. Person/vehicle ids end in -tN, and N keeps
+counting up as units and other parties are added, so selectors match the id
+PREFIX and use :visible (only the active tab's fields are visible).
 """
 
 FRAME_SELECTOR = "#formIframe"
 UNIT_SECTION = "#section-page-base-owner-02"
+OTHER_SECTION = "#section-page-base-passenger-03"
 
 STRUCTURE = {
     "add_unit_button": "#section-page-base-owner-02 div.st-nav-add",
-    "delete_unit_button": "#formDeleteVehicle",
+    "add_other_button": "#section-page-base-passenger-03 div.st-nav-add",
 }
 
 INCIDENT = {
@@ -25,22 +27,16 @@ INCIDENT = {
     "incident_cross_street": "#Incident_LossCrossStreet",
     "latitude": "#Incident_Latitude",
     "longitude": "#Incident_Longitude",
-    "special_conditions": "#Incident_AccidentCondition",
     "number_injured": "#Incident_TotalNonfatalInjuries",
     "reporting_district": "#Incident_Precinct",
     "beat": "#Incident_Beat",
     "officer_id": "#Incident_OfficerId",
     "number_killed": "#Incident_TotalFatalInjuries",
-    "milepost_distance": "#Incident_MilepostNextStreetDistance",
-    "milepost_unit": "#Incident_MilepostNextStreetDistanceMeasure",
-    "milepost_direction": "#Incident_MilepostNextStreetDirection",
-    "milepost_marker": "#Incident_Milepost",
     "or_distance": "#Incident_NextStreetDistance",
     "unit": "#Incident_NextStreetDistanceMeasure",
     "direction": "#Incident_NextStreetDirection",
     "reference_marker": "#Incident_ReferenceMarkers",
     "party_at_fault": "#Incident_MostHarmfulEvent",
-    "photographs_by": "#Incident_PhotographsBy",
     "weather": "#Incident_WeatherCondition",
     "lighting": "#Incident_LightCondition",
     "road_surface": "#Incident_RoadSurfaceCondition",
@@ -50,60 +46,95 @@ INCIDENT = {
     "motor_vehicle_involved_with": "#Incident_MotorVehicleInvolvedWith",
 }
 
-# Prefix selectors deliberately omit the changing -tN suffix.
-OWNER = {
-    "first_name": "[id^='Person_FirstName-']:visible",
-    "middle_name": "[id^='Person_MiddleName-']:visible",
-    "last_name": "[id^='Person_LastName-']:visible",
-    "suffix": "[id^='Person_NameSuffix-']:visible",
-    "sex": "[id^='Person_Sex-']:visible",
-    "same_as_driver_address": "[id^='Person_SameAsDriverAddressGui-']:visible",
-    "address_1": "[id^='Person_Address-']:visible",
-    "address_2": "[id^='Person_Address2-']:visible",
-    "state": "[id^='Person_State-']:visible",
-    "city": "[id^='Person_City-']:visible",
-    "zip_code": "[id^='Person_ZipCode-']:visible",
-    "home_phone": "[id^='Person_HomePhone-']:visible",
-    "date_of_birth": "[id^='Person_DateOfBirth-']:visible",
-    "drivers_license": "[id^='Person_DriversLicenseNumber-']:visible",
-    "drivers_license_state": "[id^='Person_DriversLicenseJurisdiction-']:visible",
-    "injury_code": "[id^='Person_InjuryStatus-']:visible",
+
+def _p(name: str) -> str:
+    return f"[id^='Person_{name}-']:visible"
+
+
+# Fields shared by Owner and Driver (Owner is the 1st match in a unit, Driver the 2nd).
+PERSON = {
+    "first_name": _p("FirstName"),
+    "middle_name": _p("MiddleName"),
+    "last_name": _p("LastName"),
+    "suffix": _p("NameSuffix"),
+    "sex": _p("Sex"),
+    "address_1": _p("Address"),
+    "address_2": _p("Address2"),
+    "state": _p("State"),
+    "city": _p("City"),
+    "zip_code": _p("ZipCode"),
+    "home_phone": _p("HomePhone"),
+    "date_of_birth": _p("DateOfBirth"),
+    "drivers_license": _p("DriversLicenseNumber"),
+    "drivers_license_state": _p("DriversLicenseJurisdiction"),
+    "injury_code": _p("InjuryStatus"),
 }
 
+OWNER = {**PERSON, "same_as_driver_address": _p("SameAsDriverAddressGui")}
+
 DRIVER = {
-    **OWNER,
+    **PERSON,
     "same_as_owner": "input[name*='Same_as_Driver_GUI']:visible",
-    "sobriety": "[id^='Person_ConditionAtTimeOfCrashCA-']:visible",
-    "safety_equipment": "[id^='Person_SafetyEquipmentRestraint-']:visible",
-    "ejected": "[id^='Person_Ejection-']:visible",
-    "taken_to": "[id^='Person_TransportedTo-']:visible",
-    "other_associated_factors_inattention": "[id^='Person_DriverDistractedBy-']:visible",
+    "sobriety": _p("ConditionAtTimeOfCrashCA"),
+    "safety_equipment": _p("SafetyEquipmentRestraint"),
+    "ejected": _p("Ejection"),
+    "taken_to": _p("TransportedTo"),
+    "other_associated_factors_inattention": _p("DriverDistractedBy"),
     "charge": "[id^='Citations_ViolationCode-']:visible",
     "cited_yes": "[id^='Citations_CitationIssued-'][id$='YES']:visible",
     "cited_no": "[id^='Citations_CitationIssued-'][id$='NO']:visible",
 }
 
+# Other Parties (passengers, witnesses, pedestrians, bicyclists).
+OTHER = {
+    "person_type": _p("PersonType"),
+    **PERSON,
+    "unit_number": _p("VehicleUnitNumber"),
+    "same_as_owner_address": _p("SameAsOwnerAddressGui"),
+    "same_as_driver_address": _p("SameAsDriverAddressGui"),
+    "sobriety": _p("ConditionAtTimeOfCrashCA"),
+    "non_motorist_actions": _p("NonMotoristActionsAtTimeOfCrash"),
+    "safety_equipment": _p("SafetyEquipmentRestraint"),
+    "ejected": _p("Ejection"),
+    "taken_to": _p("TransportedTo"),
+}
+
+# Codes the form's Person Type field expects. FILL THESE IN (see chat).
+# Person Type options on the form, keyed by the role read from the report.
+PERSON_TYPE_CODES = {
+    "WITNESS": "Witness",
+    "PASSENGER": "Passenger",
+    "PEDESTRIAN": "Pedestrian",
+    "BICYCLIST": "Pedalcyclist",  # the report says BICYCLIST, the form says Pedalcyclist
+    "OTHER": "",                  # left blank on purpose, see below
+}
+
+
+def _v(name: str) -> str:
+    return f"[id^='Vehicle_{name}-']:visible"
+
+
 VEHICLE = {
-    "tag_number": "[id^='Vehicle_LicensePlate-']:visible",
-    "tag_state": "[id^='Vehicle_RegistrationState-']:visible",
-    "vin": "[id^='Vehicle_Vin-']:visible",
-    "year": "[id^='Vehicle_ModelYear-']:visible",
-    "make": "[id^='Vehicle_Make-']:visible",
-    "model": "[id^='Vehicle_Model-']:visible",
-    "insurance_carrier": "[id^='Vehicle_InsuranceCompany-']:visible",
-    "policy_number": "[id^='Vehicle_InsurancePolicyNumber-']:visible",
-    "policy_expiration_date": "[id^='Vehicle_InsuranceExpirationDate-']:visible",
-    "impact_location": "[id^='Vehicle_DamagedAreas-']:visible",
-    "speed_limit": "[id^='Vehicle_PostedStatutorySpeedLimit-']:visible",
-    "direction_of_travel": "[id^='Vehicle_DirectionOfTravelBeforeCrash-']:visible",
-    "vehicle_type": "[id^='Vehicle_VehicleType-']:visible",
-    "damage_extent": "[id^='Vehicle_DamageRating-']:visible",
-    "special_information": "[id^='Vehicle_VehicleSpecialUse-']:visible",
-    "other_associated_factors": "[id^='Vehicle_ContributingCircumstancesVehicle-']:visible",
-    "movement_preceding_collision": "[id^='Vehicle_VehicleManeuverActionPrior-']:visible",
+    "tag_number": _v("LicensePlate"),
+    "tag_state": _v("RegistrationState"),
+    "vin": _v("Vin"),
+    "year": _v("ModelYear"),
+    "make": _v("Make"),
+    "model": _v("Model"),
+    "insurance_carrier": _v("InsuranceCompany"),
+    "policy_number": _v("InsurancePolicyNumber"),
+    "policy_expiration_date": _v("InsuranceExpirationDate"),
+    "impact_location": _v("DamagedAreas"),
+    "speed_limit": _v("PostedStatutorySpeedLimit"),
+    "direction_of_travel": _v("DirectionOfTravelBeforeCrash"),
+    "vehicle_type": _v("VehicleType"),
+    "damage_extent": _v("DamageRating"),
+    "special_information": _v("VehicleSpecialUse"),
+    "other_associated_factors": _v("ContributingCircumstancesVehicle"),
+    "movement_preceding_collision": _v("VehicleManeuverActionPrior"),
 }
 
 RADIO_ROWS = {
-    "vehicle_towed": "Vehicle Towed Yes No NA",
-    "airbag_deployed": "Airbag Deployed Yes No NA",
+    "vehicle_towed": "Vehicle Towed",
+    "airbag_deployed": "Airbag Deployed",
 }
