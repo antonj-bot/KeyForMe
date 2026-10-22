@@ -18,6 +18,7 @@ from app.extraction.openai_extractor import UnsupportedReport
 from app.states import PIPELINES
 from app.states.detect import detect_state
 
+
 KEYING_URL = "https://keying-uat.green.usgov-ecrash-prod.azuregov.lnrsg.io/ecrash/"
 DOWNLOAD_PDF_SELECTOR = "#download"
 MOCK_DIR = Path(__file__).resolve().parent / "mock"

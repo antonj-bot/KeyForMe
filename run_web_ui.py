@@ -12,15 +12,14 @@ import time
 from pathlib import Path
 from queue import Empty
 from tempfile import TemporaryDirectory
-
+from playwright.sync_api import Error as PlaywrightError
 import uvicorn
-from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
+
 from app.browser.pdf_downloader import download_report_pdf_temporarily
-from app.states import PIPELINES
-from app.states.detect import detect_state
 from app.ui import server as ui
+from app import desktop_settings as settings
 import time
 
 KEYING_URL = "https://keying-uat.green.usgov-ecrash-prod.azuregov.lnrsg.io/ecrash/"
@@ -88,6 +87,8 @@ def timed_step(label: str):
 
 
 def process_one(context, model: str):
+    from app.states import PIPELINES
+    from app.states.detect import detect_state
     total_start = time.perf_counter()
 
     try:
@@ -141,7 +142,13 @@ def process_one(context, model: str):
                 f"State detection: {detection_elapsed:.2f}s"
             )
 
-            state = (found.state or "").upper()
+            state = (found.state or "").strip().upper()
+
+            ui.log(
+                f"Detected state: {state or 'Unknown'}; "
+                f"enabled states: {', '.join(sorted(PIPELINES)) or 'None'}"
+            )
+
             pipeline = PIPELINES.get(state)
 
             if pipeline is None:
@@ -276,13 +283,16 @@ def process_one(context, model: str):
         )
 
 def main():
-    load_dotenv()
-    if not os.getenv("OPENAI_API_KEY"):
-        raise SystemExit("OPENAI_API_KEY is missing from your .env file.")
-    model = os.getenv("OPENAI_MODEL", "gpt-6-luna")
+    ready = settings.sync_environment()
+    if not ready:
+        ready = settings.show_settings()
+    if not ready:
+        return
+    model = settings.read_model()
+    ui.update(key_configured=True)
     port = free_port()
     url = f"http://127.0.0.1:{port}/"
-    config = uvicorn.Config(ui.app, host="127.0.0.1", port=port, log_level="warning", access_log=False)
+    config = uvicorn.Config(ui.app, host="127.0.0.1", port=port, log_level="warning", access_log=False, log_config=None, loop="asyncio", http="h11", ws="none")
     server = uvicorn.Server(config)
     threading.Thread(target=server.run, daemon=True, name="KeyForMe-UI").start()
     for _ in range(100):
@@ -306,6 +316,7 @@ def main():
                 chromium_sandbox=True,
                 accept_downloads=True,
                 no_viewport=True,
+                env=os.environ.copy(),
             )
             dashboard = context.pages[0] if context.pages else context.new_page()
             dashboard.goto(KEYING_URL, wait_until="domcontentloaded")
@@ -316,29 +327,112 @@ def main():
                 try:
                     command = ui.commands.get_nowait()
                 except Empty:
-                    live = [p for p in context.pages if not p.is_closed()]
+                    live = [
+                        p for p in context.pages
+                        if not p.is_closed()
+                    ]
+
                     if not live:
                         break
-                    live[0].wait_for_timeout(200)
+
+                    try:
+                        live[0].wait_for_timeout(200)
+                    except PlaywrightError:
+                        # A page can close between the check and the wait.
+                        remaining = [
+                            p for p in context.pages
+                            if not p.is_closed()
+                        ]
+
+                        if not remaining:
+                            break
+
+                        # Another tab remains open; keep the session running.
+                        if live[0].is_closed():
+                            continue
+
+                        # Do not hide an unrelated Playwright failure.
+                        raise
+
                     continue
+                if command == "settings":
+                    try:
+                        settings.show_settings()
+                        # Restart ensures extractors with cached clients cannot
+                        # keep using an old key after replacement or deletion.
+                        import tkinter as tk
+                        from tkinter import messagebox
+                        root = tk.Tk()
+                        root.withdraw()
+                        messagebox.showinfo("KeyForMe", "Settings closed. KeyForMe will now exit. Double-click KeyForMe again to continue with the saved settings.")
+                        root.destroy()
+                    finally:
+                        try:
+                            context.close()
+                        except PlaywrightError as error:
+                            if type(error).__name__ != "TargetClosedError":
+                                raise
+                    break
                 if command != "extract":
+                    continue
+                if not settings.sync_environment():
+                    ui.update(busy=False, key_configured=False, status="API key required")
                     continue
                 try:
                     process_one(context, model)
                 except Exception as error:
                     # Do not put exception strings in the UI: they may contain
                     # internal URLs or report information.
-                    print(f"KeyForMe error ({type(error).__name__}): {error}")
+                    record_error(error)
                     ui.update(status="Error")
-                    ui.log(f"Processing stopped ({type(error).__name__}); review the terminal.", "error")
+                    ui.log(
+                        f"Processing stopped ({type(error).__name__}): {error}",
+                        "warning",
+                    )
+                    import traceback
+                    traceback.print_exc()
                 finally:
                     ui.update(busy=False)
-            context.close()
+            try:
+                context.close()
+            except PlaywrightError as error:
+                # Closing an already-closed browser is normal during cleanup.
+                if type(error).__name__ != "TargetClosedError":
+                    raise   
     except KeyboardInterrupt:
         pass
     finally:
         server.should_exit = True
 
 
+def record_error(error):
+    # Type only: exception strings/tracebacks may contain report data or URLs.
+    from datetime import datetime
+    with (settings.data_dir() / "errors.log").open("a", encoding="utf-8") as log_file:
+        log_file.write(f"{datetime.now().isoformat()} {type(error).__name__}\n")
+
+
+def launch():
+    import sys
+    if getattr(sys, "frozen", False):
+        # Existing extractors may print personal data; discard console output
+        # in the windowless build rather than saving it to disk.
+        sys.stdout = open(os.devnull, "w")
+        sys.stderr = open(os.devnull, "w")
+    try:
+        main()
+    except Exception as error:
+        try:
+            record_error(error)
+        except Exception:
+            pass
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("KeyForMe startup", f"Startup failed ({type(error).__name__}). Check Chrome, Windows credentials and network access. Error types are recorded under LocalAppData/KeyForMe/errors.log.")
+        root.destroy()
+
+
 if __name__ == "__main__":
-    main()
+    launch()

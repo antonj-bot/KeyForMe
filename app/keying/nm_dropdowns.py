@@ -1,5 +1,9 @@
 """NM approved text-entry mappings. Unknown selections leave the field blank."""
 
+# KeyForMe shared-core migration v1
+from app.core.options import map_options
+
+
 def _normalize(raw):
     return " ".join(str(raw or "").upper().split())
 
@@ -162,6 +166,24 @@ INTERSECTION.update({
     "Y-INTERSECTION": "Y INT", "Y INTERSECTION": "Y INT",
 })
 FACTORS["NO DRIVER ERROR"] = "OTHER NO DRIVER ERROR"
+# Explicitly recognized formatting variations.
+# Do not split all commas: some option labels contain commas.
+
+WEATHER.update({
+    "BLOWING SAND, SOIL, DIRT, RAINING":
+        "BLOWING SAND, SOIL, DIRT;RAINING",
+})
+
+LIGHTING.update({
+    "DARK LIGHTED": "DARK-LIGHTED",
+    "DARK NOT LIGHTED": "DARK-NOT LIGHTED",
+    "DARK UNKNOWN LIGHTING": "DARK-UNKNOWN LIGHTING",
+})
+
+FACTORS.update({
+    "AVOID NO CONTACT - OTHER, WEATHER CONDITIONS":
+        "AVOID NO CONTACT - OTHER;WEATHER CONDITIONS",
+})
 NM_DROPDOWNS = {
     "weather": WEATHER, "first_harmful_event": FHE, "lighting": LIGHTING,
     "intersection_type": INTERSECTION, "injury_code": INJURY,
@@ -170,27 +192,7 @@ NM_DROPDOWNS = {
 
 
 def nm_dropdown_value(field, raw, warnings=None):
-    """Map exact approved values. Semicolons separate selections, never commas.
-
-    If any nonblank selection is unknown, return blank for the whole field.
-    """
-    if raw is None:
-        return ""
-    items = raw if isinstance(raw, (list, tuple)) else [raw]
-    parts = [_normalize(part) for item in items if item is not None
-             for part in str(item).split(";") if _normalize(part)]
-    if not parts:
-        return ""
-    mapping = NM_DROPDOWNS.get(field, {})
-    result = []
-    for part in parts:
-        if part not in mapping:
-            if warnings is not None:
-                warnings.append(f"NM {field}: unrecognized option; entire field left blank.")
-            return ""
-        if mapping[part] not in result:
-            result.append(mapping[part])
-    return ";".join(result)
+    return map_options("NM " + field, raw, NM_DROPDOWNS.get(field, {}), warnings)
 
 
 def nm_intersection_type(raw):

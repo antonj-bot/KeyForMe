@@ -13,3 +13,12 @@ recorded_*.py
 recorded_*.txt
 # Local backup files
 *.bak
+.packaging-backups/
+build/
+dist/
+*.spec*.bak.*
+.env
+*.pdf
+.scalability-backups/
+.engine-backups/
+.completeness-backups/

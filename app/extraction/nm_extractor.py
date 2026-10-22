@@ -22,6 +22,25 @@ from app.nm_models import (
 )
 
 
+
+from pydantic import BaseModel, Field
+from app.core.completeness import IncompleteExtractionError, missing_units
+
+class NMUnitInventory(BaseModel):
+    unit_numbers: list[int] = Field(default_factory=list)
+    uncertain: bool = False
+
+UNIT_INVENTORY_PROMPT = (
+    "Read only explicitly printed TRAFFIC UNIT / VEHICLE NO headings in these "
+    "three consecutive NM SH 10074 report pages. Return distinct positive unit "
+    "numbers for populated traffic-unit sections. Do not infer a second unit "
+    "from this instruction or from narrative references. Ignore blank template "
+    "blocks, passengers and witnesses. A vehicle/owner section without a repeated "
+    "heading can continue the preceding unit. Set uncertain=true if any unit "
+    "heading is unreadable, contradictory, or a continuation cannot be associated. "
+    "Do not extract names, addresses, VINs or other personal fields."
+)
+
 KEY_WHAT_YOU_SEE = (
     "KEY WHAT YOU SEE. Transcribe values exactly as printed, including "
     "misspellings, punctuation, capitalization, identifiers, leading zeros, "
@@ -50,6 +69,14 @@ NM_EXTRACTION_RULES = (
 
     "Do not infer missing dates or driver's license numbers. "
     "Preserve all VIN characters exactly as printed. "
+    
+    "When multiple weather conditions or apparent contributing "
+    "factors are explicitly marked, separate the selected option "
+    "labels with a semicolon (;), not a comma. "
+    "Preserve commas within a single option label, such as "
+    "'BLOWING SAND, SOIL, DIRT'. "
+    "Include only explicitly selected or printed values; "
+    "do not infer additional conditions from the narrative. "
 )
 
 
@@ -327,7 +354,13 @@ def extract_nm(
         page_3_image = _image(pdf.load_page(2))
         page_4_image = _image(pdf.load_page(3))
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
+
+        inventory_future = pool.submit(
+            _extract_images,
+            [page_1_image, page_2_image, page_3_image],
+            UNIT_INVENTORY_PROMPT, model, NMUnitInventory,
+        )
 
         # Page 1: Incident and Unit 1
         page_1_future = pool.submit(
@@ -357,6 +390,48 @@ def extract_nm(
         page_1_result = page_1_future.result()
         pages_2_3_result = pages_2_3_future.result()
         conclusion = page_4_future.result()
+        inventory = inventory_future.result()
+
+    if inventory.uncertain:
+        raise IncompleteExtractionError(
+            "NM unit inventory is uncertain; filling cancelled for review."
+        )
+    expected = set(inventory.unit_numbers)
+    results = [page_1_result, pages_2_3_result]
+    actual = {unit.unit_number for result in results for unit in result.units}
+    missing = missing_units(expected, actual)
+    recovery = None
+    if missing:
+        print("NM completeness: missing unit identifiers; targeted recovery started.")
+        # One recovery only, on the same three-page structured section.
+        # Preserve both sides of a split unit; never re-download or re-detect state.
+        prompt = (
+            "These are consecutive PDF pages 1, 2 and 3 of the SAME NM SH 10074 report. "
+            "Extract ONLY populated units with these printed identifiers: "
+            + ", ".join(str(n) for n in sorted(missing)) + ". "
+            "Read unit headings directly; never create a unit to satisfy the request. "
+            "Combine driver details with vehicle/owner/insurance continuations across "
+            "page boundaries. Do not copy fields between units. Return incident=null. "
+            "Return no other units. If the requested unit cannot be read, omit it "
+            "and explain in warnings. " + KEY_WHAT_YOU_SEE + NM_EXTRACTION_RULES
+        )
+        recovery = _extract_images(
+            [page_1_image, page_2_image, page_3_image], prompt, model,
+        )
+        if any(unit.unit_number not in missing for unit in recovery.units):
+            raise IncompleteExtractionError(
+                "NM recovery returned an unrequested unit; filling cancelled."
+            )
+        recovered_ids = [unit.unit_number for unit in recovery.units]
+        if len(recovered_ids) != len(set(recovered_ids)):
+            raise IncompleteExtractionError("NM recovery returned duplicate units; filling cancelled.")
+        if missing_units(expected, actual | set(recovered_ids)):
+            raise IncompleteExtractionError(
+                "NM unit extraction remains incomplete after one recovery; filling cancelled."
+            )
+        # Ignore recovery incident fields by design, even if the model returns them.
+        recovery.incident = None
+        print("NM completeness: missing unit identifiers recovered.")
 
     # Preserve approved condition fields without accepting unrelated
     # incident fields from continuation pages.
@@ -381,10 +456,12 @@ def extract_nm(
     if page_1_result.incident is not None:
         page_1_result.incident.intersection_type = None
 
-    report = merge_pages([
-        page_1_result,
-        pages_2_3_result,
-    ])
+    merge_inputs = [page_1_result, pages_2_3_result]
+    if recovery is not None:
+        merge_inputs.append(recovery)
+    report = merge_pages(merge_inputs)
+    if missing_units(expected, {unit.unit_number for unit in report.units}):
+        raise IncompleteExtractionError("NM merged report is incomplete; filling cancelled.")
 
     if conclusion.district:
         report.incident.district = conclusion.district

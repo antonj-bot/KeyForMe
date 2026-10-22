@@ -1,28 +1,58 @@
-"""NM extraction entrypoint. Browser filling intentionally disabled until validated."""
+"""New Mexico extraction and supervised form-filling pipeline."""
+
 from pathlib import Path
+
 from app.extraction.nm_extractor import extract_nm
 from app.keying.nm_mapper import map_nm
+
 
 NAME = "New Mexico SH 10074"
 
 
 def extract(pdf_path: Path, model: str) -> dict:
     report = extract_nm(pdf_path, model)
-
-    print("\n===== RAW INCIDENT VALUES =====")
-    print("Weather:", repr(report.incident.weather))
-    print("Lighting:", repr(report.incident.lighting))
-
-    payload = map_nm(report)
-
-    print("\n===== MAPPED INCIDENT VALUES =====")
-    print("Weather:", repr(payload["incident"].get("weather")))
-    print("Lighting:", repr(payload["incident"].get("lighting")))
-
-    return payload
+    return map_nm(report)
 
 
 def fill(page, payload: dict) -> None:
-    raise NotImplementedError(
-        "NM form filling is not enabled yet. Validate the NM payload and selectors first."
+    from app.browser.nm_filler import fill_nm_form
+    from app.ui import server as ui
+
+    units = payload.get("units", [])
+
+    if not units:
+        raise ValueError("No NM units available to fill.")
+
+    # Stop before modifying the form if extraction needs review.
+    notes = payload.get("notes", [])
+
+    if notes:
+        for note in notes:
+            ui.log(str(note), "warning")
+
+        raise ValueError(
+            "NM extraction has unresolved notes; filling cancelled."
+        )
+
+    ui.log(
+        "NM supervised filling started. "
+        "Missing vehicle units will be created automatically.",
+        "warning",
+    )
+
+    warnings = fill_nm_form(
+        page,
+        payload,
+        log=ui.log,
+    ) or []
+
+    for warning in warnings:
+        ui.log(str(warning), "warning")
+
+    ui.update(warnings=len(warnings))
+
+    ui.log(
+        "NM filler finished. Review skipped fields and "
+        "VIN lookup results before saving.",
+        "warning" if warnings else "success",
     )

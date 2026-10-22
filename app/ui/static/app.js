@@ -9,7 +9,9 @@ async function refresh(){
     const s=await r.json();token=s.token;
     $('status').textContent=s.status;
     $('dot').classList.toggle('busy',s.busy);
-    $('extract').disabled=s.busy;
+    $('extract').disabled=s.busy || !s.key_configured;
+      $('settings').disabled=s.busy;
+      $('key-status').textContent=s.key_configured?'Key configured for this Windows account (API access not validated).':'No key configured. Open API Settings.';
     $('extract').innerHTML=s.busy?'Working…':'Extract <span aria-hidden="true">→</span>';
     $('report').textContent=s.report_type||'—';
     $('units').textContent=s.units??'—';
@@ -33,3 +35,12 @@ $('extract').addEventListener('click',async()=>{
 });
 $('clear').addEventListener('click',()=>{fetch('/api/state').then(r=>r.json()).then(s=>{clearedBefore=s.logs.length;lastSignature='';$('loglist').replaceChildren();});});
 setInterval(refresh,700);refresh();
+
+$('settings').addEventListener('click', async () => {
+  $('settings').disabled = true;
+  try {
+    const r = await fetch('/api/settings', {method:'POST', headers:{'X-KeyForMe-Token':token}});
+    if (!r.ok) throw Error((await r.json()).detail || 'Could not open settings');
+  } catch (e) { alert(e.message); }
+  refresh();
+});
