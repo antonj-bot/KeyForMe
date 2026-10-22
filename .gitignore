@@ -21,3 +21,4 @@ dist/
 *.pdf
 .scalability-backups/
 .engine-backups/
+.completeness-backups/
