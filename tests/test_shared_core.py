@@ -16,7 +16,7 @@ class Control:
         if self.kind == "panel": return 1
         return len(self.section.hrefs) if self.index is None else int(self.index < len(self.section.hrefs))
     def nth(self,index): return Control(self.section,index)
-    def get_attribute(self,name):
+    def get_attribute(self,name, **kwargs):
         if name == "href": return self.section.hrefs[self.index]
         if name == "aria-selected": return "true" if self.section.active == self.index else "false"
         if name == "aria-hidden": return "false" if self.section.active == self.index else "true"
@@ -36,7 +36,7 @@ class Control:
 
 class Section:
     def __init__(self):
-        self.hrefs=["#panel-1"]; self.active=0; self.clicks=0; self.add_count=1; self.add_amount=1
+        self.page=Page(); self.hrefs=["#panel-1"]; self.active=0; self.clicks=0; self.add_count=1; self.add_amount=1
     def count(self): return 1
     def locator(self,selector):
         if selector.startswith("[id="):
@@ -46,6 +46,7 @@ class Section:
         return Control(self)
 
 class Page:
+    def is_closed(self): return False
     def wait_for_timeout(self,ms): pass
 
 class CoreTests(unittest.TestCase):
