@@ -44,19 +44,34 @@ Remove-Item ".\build" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item ".\dist" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item ".\KeyForMe.spec" -Force -ErrorAction SilentlyContinue
 
+Write-Host "Validating UI assets..." -ForegroundColor Cyan
+$StaticDir = Join-Path $ProjectRoot "app\ui\static"
+if (-not (Test-Path $StaticDir -PathType Container)) {
+    throw "Required UI asset directory is missing: $StaticDir"
+}
+
 Write-Host "Building one-file Windows executable..." -ForegroundColor Cyan
-& $Python -m PyInstaller `
-    --noconfirm `
-    --clean `
-    --onefile `
-    --windowed `
-    --name KeyForMe `
-    --hidden-import keyring.backends.Windows `
-    --collect-submodules app.ai `
-    --collect-submodules app.states `
-    --collect-submodules app.extraction `
-    --collect-submodules app.browser `
-    run_web_ui.py
+$PyInstallerArgs = @(
+    "--noconfirm",
+    "--clean",
+    "--onefile",
+    "--windowed",
+    "--name", "KeyForMe",
+    "--hidden-import", "keyring.backends.Windows",
+    "--collect-submodules", "app.ai",
+    "--collect-submodules", "app.states",
+    "--collect-submodules", "app.extraction",
+    "--collect-submodules", "app.browser",
+    "--add-data", "$StaticDir;app/ui/static"
+)
+
+$TemplatesDir = Join-Path $ProjectRoot "app\ui\templates"
+if (Test-Path $TemplatesDir -PathType Container) {
+    $PyInstallerArgs += @("--add-data", "$TemplatesDir;app/ui/templates")
+}
+
+$PyInstallerArgs += "run_web_ui.py"
+& $Python -m PyInstaller @PyInstallerArgs
 
 $Exe = Join-Path $ProjectRoot "dist\KeyForMe.exe"
 if (-not (Test-Path $Exe)) {
