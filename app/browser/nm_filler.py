@@ -5,31 +5,77 @@ from playwright.sync_api import Page
 from app.browser.nm_field_mapping import FRAME, UNIT_SECTION, INCIDENT, OWNER, DRIVER, VEHICLE
 
 
+
 def _fill_control(control, value, label, warnings):
     if value is None or str(value) == "":
         return
+
+    text = str(value)
+
     try:
-        if control.evaluate("e => e.tagName") == "SELECT":
-            opts = control.locator("option").evaluate_all(
-                "os => os.map(o => ({value:o.value, label:o.textContent.trim()}))"
+        metadata = control.evaluate(
+            """
+            element => ({
+                tag: element.tagName,
+                options: element.tagName === "SELECT"
+                    ? Array.from(element.options, option => ({
+                        value: option.value,
+                        label: option.textContent.trim()
+                    }))
+                    : []
+            })
+            """
+        )
+
+        is_select = metadata["tag"] == "SELECT"
+
+        if is_select:
+            wanted = text.casefold()
+
+            match = next(
+                (
+                    option
+                    for option in metadata["options"]
+                    if wanted in (
+                        option["value"].casefold(),
+                        option["label"].casefold(),
+                    )
+                ),
+                None,
             )
-            match = next((o for o in opts if str(value).casefold() in
-                          (o["value"].casefold(), o["label"].casefold())), None)
+
             if match is None:
-                warnings.append(f"{label}: no exact dropdown option; skipped")
+                warnings.append(
+                    f"{label}: no exact dropdown option; skipped"
+                )
                 return
-            control.select_option(value=match["value"])
+
+            expected = match["value"]
+            control.select_option(value=expected)
         else:
-            control.fill(str(value), timeout=3000)
+            expected = text
+            control.fill(text, timeout=3000)
             control.press("Tab")
+
         actual = control.input_value()
-        if actual.strip().casefold() != str(value).strip().casefold() and not (
-            control.evaluate("e => e.tagName") == "SELECT"
-            and actual == match["value"]
-        ):
-            warnings.append(f"{label}: readback differs; review")
+
+        if is_select:
+            retained = actual == expected
+        else:
+            retained = (
+                actual.strip().casefold()
+                == expected.strip().casefold()
+            )
+
+        if not retained:
+            warnings.append(
+                f"{label}: readback differs; review"
+            )
+
     except Exception as exc:
-        warnings.append(f"{label}: {type(exc).__name__}; review")
+        warnings.append(
+            f"{label}: {type(exc).__name__}; review"
+        )
 
 
 def _fill(scope, selector, value, label, warnings):
@@ -204,8 +250,19 @@ def _fill_nm_vin(page: Page, panel, vehicle_data: dict, unit_number: int, warnin
         vin_box.fill(vin, timeout=3000)
         vin_box.press("Tab")
 
-        if len(vin.upper()) != 17 or any(char in vin.upper() for char in "IOQ"):
-            warnings.append(f"Unit {unit_number}: VIN was keyed as printed but may be rejected; review it")
+        vin_upper = vin.upper()
+        invalid_format = (
+            len(vin_upper) != 17
+            or any(char in vin_upper for char in "IOQ")
+        )
+
+        if invalid_format:
+            warnings.append(
+                f"Unit {unit_number}: VIN keyed exactly as printed; "
+                "format requires review. Popup wait skipped; "
+                "continuing with year/make/model from the report."
+            )
+            return False
 
         if not _click_vin_popup_ok(page):
             warnings.append(
@@ -229,10 +286,46 @@ def _fill_nm_vin(page: Page, panel, vehicle_data: dict, unit_number: int, warnin
         return False
 
 
-def ensure_nm_units(page, required: int, log=None) -> None:
-    """Create missing NM vehicle-unit tabs before filling any fields."""
-    from playwright.sync_api import expect
+def _nm_unit_tabs(section):
+    """
+    Return initialized NM vehicle-unit tabs.
 
+    The anchor's ui-id is dynamically generated, so unit identity
+    comes from tab order and the href-linked panel.
+    """
+    return section.locator(
+        "li[role='tab'] > a.ui-tabs-anchor[role='presentation']"
+    )
+
+
+def _nm_tab_panel(section, tab, unit_number: int):
+    """
+    Resolve a unit tab to the actual panel referenced by its href.
+    """
+    href = (tab.get_attribute("href") or "").strip()
+
+    if not href.startswith("#"):
+        raise RuntimeError(
+            f"NM Unit {unit_number} tab has an invalid "
+            f"panel reference: {href!r}"
+        )
+
+    panel = section.locator(href)
+
+    if panel.count() != 1:
+        raise RuntimeError(
+            f"NM Unit {unit_number} panel {href!r} "
+            f"is missing or ambiguous."
+        )
+
+    return panel
+
+
+def ensure_nm_units(page, required: int, log=None) -> None:
+    """
+    Create missing NM vehicle-unit tabs using the same count-and-wait
+    method as CA, while allowing dynamically generated NM tab IDs.
+    """
     if required < 1:
         raise ValueError("NM requires at least one extracted unit.")
 
@@ -243,10 +336,7 @@ def ensure_nm_units(page, required: int, log=None) -> None:
             "NM vehicle-unit section missing or ambiguous."
         )
 
-    tabs = section.locator(
-        "a.ui-tabs-anchor[href^='#tabs-']"
-    )
-
+    tabs = _nm_unit_tabs(section)
     current = tabs.count()
 
     if current < 1:
@@ -254,115 +344,214 @@ def ensure_nm_units(page, required: int, log=None) -> None:
             "No NM vehicle-unit tabs found; nothing filled."
         )
 
+    
+    # The NM form's actual clickable control is the visible (+) anchor.
+    # No Add Unit control is needed when enough units already exist.
     if current >= required:
         return
 
-    # Scoped to vehicle units, not Other Parties.
-    add_button = section.locator(
-        "div.st-nav-add:visible"
-    )
+    # Search the vehicle SECTION, not the tab-navigation <ul>.
+    # Do not use a.add-item: it may add a nested vehicle detail.
+    add_button = section.locator("div.st-nav-add:visible")
 
-    if add_button.count() != 1:
+    matches = add_button.count()
+
+    if matches != 1:
         raise RuntimeError(
-            "NM vehicle Add Unit button missing or ambiguous; "
-            "nothing filled."
+            "NM vehicle Add Unit control: "
+            f"expected 1 visible div.st-nav-add inside "
+            f"{UNIT_SECTION}, found {matches}. "
+            "No Add Unit click was attempted."
         )
 
     while current < required:
-        if log:
-            log(f"Adding NM vehicle unit {current + 1}...")
+        before = current
 
+        if log:
+            log(f"Adding NM vehicle unit {before + 1}...")
+
+        if not add_button.is_visible():
+            raise RuntimeError(
+                f"NM form has {before} vehicle unit(s), "
+                f"but requires {required}, and the Add Unit "
+                "button is not visible."
+            )
+
+        
+        add_button.scroll_into_view_if_needed(timeout=3000)
         add_button.click(timeout=5000)
 
-        try:
-            # Wait for exactly one new tab before clicking again.
-            expect(tabs).to_have_count(
-                current + 1,
-                timeout=10000,
-            )
-        except AssertionError as error:
-            raise RuntimeError(
-                "NM Add Unit did not create exactly one new tab. "
-                "Review the form before retrying; "
-                "no report fields were filled."
-            ) from error
+        expected = before + 1
 
-        current = tabs.count()
+        # Same approach as CA: wait until the unit count increases.
+        for _ in range(50):
+            page.wait_for_timeout(200)
+            current = tabs.count()
+            if current > before:
+                break
+        else:
+            raise RuntimeError(
+                f"Clicked the NM Add Unit button, but Unit "
+                f"{before + 1} did not appear."
+            )
+
+        # Small stabilization delay for the NM form's jQuery event handlers.
+        page.wait_for_timeout(300)
+        # Same approach as CA: wait until the unit count increases.
+        for _ in range(50):
+            page.wait_for_timeout(200)
+            current = tabs.count()
+
+            if current > before:
+                break
+        else:
+            raise RuntimeError(
+                f"Clicked the NM Add Unit button, but Unit "
+                f"{before + 1} did not appear."
+            )
+
+        # One click must create exactly one vehicle unit.
+        if current != before + 1:
+            raise RuntimeError(
+                "NM Add Unit created an unexpected number of tabs. "
+                f"Before: {before}; after: {current}."
+            )
 
         if log:
-            log(f"NM vehicle units available: {current}")
+            log(f"NM vehicle unit {current} added.")
 
-    # Verify the numbered tabs expected by the existing filler.
-    for number in range(1, required + 1):
-        link = section.locator(
-            f"a.ui-tabs-anchor[href='#tabs-{number}']"
-        )
+    # Validate the first required tabs and their actual linked panels.
+    seen_panels = set()
 
-        if link.count() != 1:
+    for index in range(required):
+        unit_number = index + 1
+        tab = tabs.nth(index)
+
+        href = (tab.get_attribute("href") or "").strip()
+
+        if not href.startswith("#"):
             raise RuntimeError(
-                f"NM vehicle unit {number} is missing or ambiguous; "
-                "nothing filled."
+                f"NM Unit {unit_number} tab has an invalid "
+                f"panel reference: {href!r}"
             )
-               
-def _activate_nm_unit(section, number: int) -> None:
-    """Activate one exact NM unit tab and verify its panel is active."""
-    href = f"#tabs-{number}"
-    tab = section.locator(
-        f"a.ui-tabs-anchor[href='{href}']"
+
+        if href in seen_panels:
+            raise RuntimeError(
+                f"NM Unit {unit_number} reuses panel {href!r}."
+            )
+
+        _nm_tab_panel(
+            section,
+            tab,
+            unit_number,
+        )
+
+        seen_panels.add(href)
+
+
+def _activate_nm_unit(section, number: int):
+    """
+    Activate an NM unit by tab order and return its linked panel.
+    Retries briefly because added jQuery UI tabs initialize asynchronously.
+    """
+    deadline = time.monotonic() + 8.0
+    last_error = None
+
+    while time.monotonic() < deadline:
+        try:
+            tabs = _nm_unit_tabs(section)
+            count = tabs.count()
+
+            if number > count:
+                raise RuntimeError(
+                    f"only {count} NM vehicle tab(s) are currently initialized"
+                )
+
+            tab = tabs.nth(number - 1)
+            href = (tab.get_attribute("href") or "").strip()
+
+            if not href.startswith("#"):
+                raise RuntimeError(
+                    f"NM Unit {number} tab has no valid href yet"
+                )
+
+            panel = section.locator(href)
+
+            if panel.count() != 1:
+                raise RuntimeError(
+                    f"NM Unit {number} panel {href!r} is not ready"
+                )
+
+            tab.scroll_into_view_if_needed(timeout=1000)
+            tab.click(timeout=2000)
+            panel.wait_for(state="visible", timeout=2000)
+
+            selected = tab.get_attribute("aria-selected")
+            hidden = panel.get_attribute("aria-hidden")
+
+            if selected == "false" or hidden == "true":
+                raise RuntimeError(
+                    f"NM Unit {number} has not become active yet"
+                )
+
+            return panel
+
+        except Exception as error:
+            last_error = error
+            time.sleep(0.2)
+
+    raise RuntimeError(
+        f"NM Unit {number} could not be activated after 8 seconds: "
+        f"{last_error}"
     )
-    panel = section.locator(href)
-
-    if tab.count() != 1:
-        raise RuntimeError(
-            f"NM Unit {number} tab is missing or ambiguous."
-        )
-
-    if panel.count() != 1:
-        raise RuntimeError(
-            f"NM Unit {number} panel is missing or ambiguous."
-        )
-
-    try:
-        tab.first.scroll_into_view_if_needed(timeout=3000)
-        tab.first.click(timeout=5000)
-    except Exception:
-        # jQuery UI tabs can leave an overlay over the anchor after VIN lookup.
-        # Dispatch a DOM click only on the already-verified exact unit anchor.
-        tab.first.dispatch_event("click")
-
-    try:
-        panel.first.wait_for(state="visible", timeout=10000)
-    except Exception as error:
-        raise RuntimeError(
-            f"NM Unit {number} did not become active after its tab was clicked."
-        ) from error
-
-    # Verify jQuery UI's active relationship when the attributes are present.
-    selected = tab.first.get_attribute("aria-selected")
-    hidden = panel.first.get_attribute("aria-hidden")
-
-    if selected == "false" or hidden == "true":
-        raise RuntimeError(
-            f"NM Unit {number} panel remained inactive after tab selection."
-        )
 
 
-def fill_nm_form(page: Page, payload: dict) -> list[str]:
+
+def fill_nm_form(
+    page: Page,
+    payload: dict,
+    log=None,
+) -> list[str]:
     warnings = []
     frame = page.frame_locator(FRAME)
+    units = payload.get("units", [])
+
+    ensure_nm_units(
+        page,
+        len(units),
+        log=log,
+    )
+
     # Avoid filling the same incident input twice under different payload names.
     for key, value in payload.get("incident", {}).items():
         if key in INCIDENT:
-            _fill(frame, INCIDENT[key], value, f"incident.{key}", warnings)
+            _fill(
+                frame,
+                INCIDENT[key],
+                value,
+                f"incident.{key}",
+                warnings,
+            )
+
     section = frame.locator(UNIT_SECTION)
+    
     if section.count() != 1:
         raise RuntimeError("NM unit section missing or ambiguous")
-    units = payload.get("units", [])
-    if section.locator("a.ui-tabs-anchor[href^='#tabs-']").count() < len(units):
-        raise RuntimeError("Not enough captured NM unit tabs")
+
+    available = _nm_unit_tabs(section).count()
+
+    if available < len(units):
+        raise RuntimeError(
+            f"NM form has {available} vehicle unit tab(s), "
+            f"but the report requires {len(units)}."
+        )
+        
     for number, unit in enumerate(units, 1):
-        _activate_nm_unit(section, number)
-        panel = section.locator(f"#tabs-{number}").first
+        if log:
+            log(f"Keying NM vehicle unit {number}...")
+
+        panel = _activate_nm_unit(section, number)
+        
         _fill_person(panel, OWNER, unit.get("owner", {}), "owner", warnings)
         _fill_person(panel, DRIVER, unit.get("driver", {}), "driver", warnings)
         vehicle_data = unit.get("vehicle", {})
@@ -380,7 +569,21 @@ def fill_nm_form(page: Page, payload: dict) -> list[str]:
         )
 
         # VIN is handled first because confirmation may populate Year/Make/Model.
-        decoded = _fill_nm_vin(page, panel, vehicle_data, number, warnings)
+        vin_start = time.perf_counter()
+
+        decoded = _fill_nm_vin(
+            page,
+            panel,
+            vehicle_data,
+            number,
+            warnings,
+        )
+
+        if log:
+            log(
+                f"NM Unit {number} VIN handling: "
+                f"{time.perf_counter() - vin_start:.2f}s"
+            )
 
         for key, value in vehicle_data.items():
             if key == "vin":

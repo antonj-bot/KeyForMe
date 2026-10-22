@@ -15,11 +15,7 @@ def extract(pdf_path: Path, model: str) -> dict:
 
 
 def fill(page, payload: dict) -> None:
-    from app.browser.nm_filler import (
-        ensure_nm_units,
-        fill_nm_form,
-    )
-    from app.browser.nm_field_mapping import FRAME, UNIT_SECTION
+    from app.browser.nm_filler import fill_nm_form
     from app.ui import server as ui
 
     units = payload.get("units", [])
@@ -38,40 +34,17 @@ def fill(page, payload: dict) -> None:
             "NM extraction has unresolved notes; filling cancelled."
         )
 
-    # The current NM filler does not create vehicle units.
-    section = page.frame_locator(FRAME).locator(UNIT_SECTION)
-
-    if section.count() != 1:
-        raise RuntimeError(
-            "NM vehicle-unit section missing or ambiguous."
-        )
-
-    available = section.locator(
-        "a.ui-tabs-anchor[href^='#tabs-']"
-    ).count()
-
-    if available < len(units):
-        ui.log(
-            f"NM requires {len(units)} vehicle units, "
-            f"but the form has {available}. "
-            "Add the missing units manually, then retry.",
-            "warning",
-        )
-
-        # Create missing units before filling incident or person fields.
-        ensure_nm_units(
-            page,
-            required=len(units),
-            log=ui.log,
-        )
-
     ui.log(
         "NM supervised filling started. "
-        "Review VIN lookup dialogs and all keyed fields.",
+        "Missing vehicle units will be created automatically.",
         "warning",
     )
 
-    warnings = fill_nm_form(page, payload) or []
+    warnings = fill_nm_form(
+        page,
+        payload,
+        log=ui.log,
+    ) or []
 
     for warning in warnings:
         ui.log(str(warning), "warning")

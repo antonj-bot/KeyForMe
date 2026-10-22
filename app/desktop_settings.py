@@ -52,14 +52,22 @@ def read_model():
 
 
 def sync_environment():
-    # Existing extractors create clients from OPENAI_API_KEY. Use the vault as
-    # the sole credential source, not an inherited/shared key or a nearby .env.
-    key = read_key()
-    if key:
-        os.environ["OPENAI_API_KEY"] = key
-    else:
-        os.environ.pop("OPENAI_API_KEY", None)
-    return bool(key)
+    # Development override:
+    # temporary key inherited from the current PowerShell session.
+    session_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if session_key:
+        os.environ["OPENAI_API_KEY"] = session_key
+        return True
+
+    # Packaged EXE:
+    # use the key saved by this Windows user.
+    stored_key = read_key().strip()
+    if stored_key:
+        os.environ["OPENAI_API_KEY"] = stored_key
+        return True
+
+    os.environ.pop("OPENAI_API_KEY", None)
+    return False
 
 
 def show_settings():
@@ -72,7 +80,10 @@ def show_settings():
     window.attributes("-topmost", True)
     box = ttk.Frame(window, padding=22)
     box.grid()
-    configured = bool(read_key())
+    configured = bool(
+        os.getenv("OPENAI_API_KEY", "").strip()
+        or read_key().strip()
+    )
     ttk.Label(box, text="KeyForMe API setup", font=("Segoe UI", 15, "bold")).grid(row=0,column=0,columnspan=3,sticky="w")
     ttk.Label(box, text=("A key is stored for this Windows account." if configured else "Enter your own authorized API key to get started.")).grid(row=1,column=0,columnspan=3,pady=(10,12),sticky="w")
     ttk.Label(box,text="API key (leave empty to keep the stored key)").grid(row=2,column=0,columnspan=3,sticky="w")

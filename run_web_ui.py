@@ -315,7 +315,7 @@ def main():
                 chromium_sandbox=True,
                 accept_downloads=True,
                 no_viewport=True,
-                env={k: v for k, v in os.environ.items() if k not in {"OPENAI_API_KEY", "OPENAI_ADMIN_KEY"}},
+                env=os.environ.copy(),
             )
             dashboard = context.pages[0] if context.pages else context.new_page()
             dashboard.goto(KEYING_URL, wait_until="domcontentloaded")
@@ -357,7 +357,12 @@ def main():
                     # internal URLs or report information.
                     record_error(error)
                     ui.update(status="Error")
-                    ui.log(f"Processing stopped ({type(error).__name__}); check API access, Chrome, and network settings.", "error")
+                    ui.log(
+                        f"Processing stopped ({type(error).__name__}): {error}",
+                        "warning",
+                    )
+                    import traceback
+                    traceback.print_exc()
                 finally:
                     ui.update(busy=False)
             context.close()
