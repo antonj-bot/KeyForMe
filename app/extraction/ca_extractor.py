@@ -1,4 +1,4 @@
-# KeyForMe fix4
+from app.ai.runtime import get_ai_client
 import base64
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 
 import pymupdf
-from openai import OpenAI
+
 
 from app.models import (
     CaliforniaCHP555,
@@ -152,18 +152,12 @@ INJURY_PROMPT = (
     + RULES
 )
 
-_client = None
+
 
 
 class UnsupportedReport(Exception):
     pass
 
-
-def client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI()
-    return _client
 
 
 def _jpeg(pix) -> str:
@@ -230,21 +224,15 @@ def _call(prompt: str, images, schema, model: str):
     if isinstance(images, str):
         images = [images]
     start = time.perf_counter()
-    response = client().responses.parse(
+    result = get_ai_client().parse(
         model=model,
-        reasoning={"effort": "none"},
-        input=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": [
-                {"type": "input_image", "image_url": url, "detail": "high"} for url in images
-            ]},
-        ],
-        text_format=schema,
+        instructions=prompt,
+        content=[{"type": "input_image", "image_url": url, "detail": "high"} for url in images],
+        schema=schema,
+        reasoning_effort="none",
     )
-    if response.output_parsed is None:
-        raise RuntimeError("Model returned no parsed result.")
     print(f"  {schema.__name__}: {time.perf_counter() - start:.1f}s")
-    return response.output_parsed
+    return result
 
 
 TEXT_TITLES = (

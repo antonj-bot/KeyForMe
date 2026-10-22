@@ -1,4 +1,4 @@
-"""Run from project root: python -m tests.test_nm_fill
+﻿"""Run from project root: python -m tests.test_nm_fill
 Starts a local HTTP server and fills only the first two captured NM tabs.
 No OpenAI calls, no eCrash access, no real report data.
 """
@@ -7,7 +7,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 from playwright.sync_api import sync_playwright
-from app.browser.nm_filler import fill_nm_form
+from app.browser.engine import fill_form
 
 ROOT=Path(__file__).resolve().parents[1]
 MOCK=ROOT/'mock'/'nm'
@@ -36,3 +36,4 @@ def main():
         server.shutdown()
 
 if __name__=='__main__':main()
+

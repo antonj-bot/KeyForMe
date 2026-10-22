@@ -22,3 +22,7 @@ dist/
 .scalability-backups/
 .engine-backups/
 .completeness-backups/
+KeyForMe_shared_state_foundation/
+.provider-backups/
+app_backup/
+ToFix.txt

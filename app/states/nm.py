@@ -15,7 +15,7 @@ def extract(pdf_path: Path, model: str) -> dict:
 
 
 def fill(page, payload: dict) -> None:
-    from app.browser.nm_filler import fill_nm_form
+    from app.browser.engine import fill_form
     from app.ui import server as ui
 
     units = payload.get("units", [])
@@ -40,9 +40,10 @@ def fill(page, payload: dict) -> None:
         "warning",
     )
 
-    warnings = fill_nm_form(
+    warnings = fill_form(
         page,
         payload,
+        state="NM",
         log=ui.log,
     ) or []
 

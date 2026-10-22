@@ -200,8 +200,6 @@ def _extract_images(
     model: str,
     schema=NMPageExtraction,
 ):
-    # Delayed import lets mapping unit tests run without importing OpenAI.
-    from openai import OpenAI
 
     content = []
 
@@ -224,32 +222,14 @@ def _extract_images(
             }
         )
 
-    response = OpenAI().responses.parse(
+    from app.ai.runtime import get_ai_client
+    return get_ai_client().parse(
         model=model,
-        reasoning={
-            "effort": "none",
-        },
-        input=[
-            {
-                "role": "system",
-                "content": prompt,
-            },
-            {
-                "role": "user",
-                "content": content,
-            },
-        ],
-        text_format=schema,
+        instructions=prompt,
+        content=content,
+        schema=schema,
+        reasoning_effort="none",
     )
-
-    result = response.output_parsed
-
-    if result is None:
-        raise RuntimeError(
-            "NM extraction returned no structured result."
-        )
-
-    return result
 
 
 def _merge_fields(

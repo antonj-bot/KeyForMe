@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import sys
 import time
@@ -7,7 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
-from app.extraction.openai_extractor import UnsupportedReport
+from app.extraction.ca_extractor import UnsupportedReport
 from app.states import PIPELINES
 from app.states.detect import detect_state
 
@@ -64,3 +64,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

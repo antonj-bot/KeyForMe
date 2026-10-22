@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import functools
 import http.server
@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from playwright.sync_api import Page, sync_playwright
 
 from app.browser.pdf_downloader import download_report_pdf_temporarily
-from app.extraction.openai_extractor import UnsupportedReport
+from app.extraction.ca_extractor import UnsupportedReport
 from app.states import PIPELINES
 from app.states.detect import detect_state
 

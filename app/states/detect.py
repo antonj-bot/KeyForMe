@@ -4,7 +4,7 @@ import re
 import pymupdf
 from pydantic import BaseModel
 
-from app.extraction.openai_extractor import client
+from app.ai.runtime import get_ai_client
 
 
 class ReportID(BaseModel):
@@ -62,28 +62,19 @@ def detect_from_image(page, model: str) -> ReportID:
         pix.tobytes("jpeg", jpg_quality=85)
     ).decode()
 
-    response = client().responses.parse(
+    return get_ai_client().parse(
         model=model,
-        reasoning={"effort": "none"},
-        input=[
-            {
-                "role": "system",
-                "content": (
-                    "This is the top of a police crash report. Read the printed "
-                    "header text only. Return the state exactly as printed "
-                    "(e.g. 'STATE OF CALIFORNIA' -> CA), the form name or number "
-                    "exactly as printed, and the agency. If the header does not "
-                    "print a state, return null. Never guess from layout."
-                ),
-            },
-            {
-                "role": "user",
-                "content": [{"type": "input_image", "image_url": image, "detail": "high"}],
-            },
-        ],
-        text_format=ReportID,
+        instructions=(
+            "This is the top of a police crash report. Read the printed "
+            "header text only. Return the state exactly as printed "
+            "(e.g. 'STATE OF CALIFORNIA' -> CA), the form name or number "
+            "exactly as printed, and the agency. If the header does not "
+            "print a state, return null. Never guess from layout."
+        ),
+        content=[{"type": "input_image", "image_url": image, "detail": "high"}],
+        schema=ReportID,
+        reasoning_effort="none",
     )
-    return response.output_parsed
 
 
 def detect_state(pdf_path, model: str) -> ReportID:

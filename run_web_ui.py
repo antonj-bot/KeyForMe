@@ -288,6 +288,9 @@ def main():
         ready = settings.show_settings()
     if not ready:
         return
+    from app.ai.runtime import configure_ai
+    provider = settings.read_provider()
+    configure_ai(provider)
     model = settings.read_model()
     ui.update(key_configured=True)
     port = free_port()
