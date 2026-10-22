@@ -1,4 +1,10 @@
 """NM supervised filler. Never saves or submits."""
+
+# KeyForMe shared-core migration v1
+from app.core.tabs import TabSpec, unit_tabs, panel_for_tab, ensure_tabs, activate_tab as shared_activate_tab
+from app.core.vin import NONBLOCKING_FORMAT_ERRORS, should_attempt_vin_lookup
+NM_TABS = TabSpec(anchors="li[role='tab'] > a.ui-tabs-anchor[role='presentation']", settle_ms=300)
+
 import time
 
 from playwright.sync_api import Page
@@ -250,18 +256,10 @@ def _fill_nm_vin(page: Page, panel, vehicle_data: dict, unit_number: int, warnin
         vin_box.fill(vin, timeout=3000)
         vin_box.press("Tab")
 
-        vin_upper = vin.upper()
-        invalid_format = (
-            len(vin_upper) != 17
-            or any(char in vin_upper for char in "IOQ")
-        )
-
-        if invalid_format:
-            warnings.append(
-                f"Unit {unit_number}: VIN keyed exactly as printed; "
-                "format requires review. Popup wait skipped; "
-                "continuing with year/make/model from the report."
-            )
+        if not should_attempt_vin_lookup(
+            vin, policy=NONBLOCKING_FORMAT_ERRORS,
+            unit_number=unit_number, warn=warnings.append,
+        ):
             return False
 
         if not _click_vin_popup_ok(page):
@@ -287,223 +285,22 @@ def _fill_nm_vin(page: Page, panel, vehicle_data: dict, unit_number: int, warnin
 
 
 def _nm_unit_tabs(section):
-    """
-    Return initialized NM vehicle-unit tabs.
-
-    The anchor's ui-id is dynamically generated, so unit identity
-    comes from tab order and the href-linked panel.
-    """
-    return section.locator(
-        "li[role='tab'] > a.ui-tabs-anchor[role='presentation']"
-    )
+    return unit_tabs(section, NM_TABS)
 
 
 def _nm_tab_panel(section, tab, unit_number: int):
-    """
-    Resolve a unit tab to the actual panel referenced by its href.
-    """
-    href = (tab.get_attribute("href") or "").strip()
-
-    if not href.startswith("#"):
-        raise RuntimeError(
-            f"NM Unit {unit_number} tab has an invalid "
-            f"panel reference: {href!r}"
-        )
-
-    panel = section.locator(href)
-
-    if panel.count() != 1:
-        raise RuntimeError(
-            f"NM Unit {unit_number} panel {href!r} "
-            f"is missing or ambiguous."
-        )
-
-    return panel
+    return panel_for_tab(section, tab, unit_number)
 
 
 def ensure_nm_units(page, required: int, log=None) -> None:
-    """
-    Create missing NM vehicle-unit tabs using the same count-and-wait
-    method as CA, while allowing dynamically generated NM tab IDs.
-    """
     if required < 1:
         raise ValueError("NM requires at least one extracted unit.")
-
     section = page.frame_locator(FRAME).locator(UNIT_SECTION)
-
-    if section.count() != 1:
-        raise RuntimeError(
-            "NM vehicle-unit section missing or ambiguous."
-        )
-
-    tabs = _nm_unit_tabs(section)
-    current = tabs.count()
-
-    if current < 1:
-        raise RuntimeError(
-            "No NM vehicle-unit tabs found; nothing filled."
-        )
-
-    
-    # The NM form's actual clickable control is the visible (+) anchor.
-    # No Add Unit control is needed when enough units already exist.
-    if current >= required:
-        return
-
-    # Search the vehicle SECTION, not the tab-navigation <ul>.
-    # Do not use a.add-item: it may add a nested vehicle detail.
-    add_button = section.locator("div.st-nav-add:visible")
-
-    matches = add_button.count()
-
-    if matches != 1:
-        raise RuntimeError(
-            "NM vehicle Add Unit control: "
-            f"expected 1 visible div.st-nav-add inside "
-            f"{UNIT_SECTION}, found {matches}. "
-            "No Add Unit click was attempted."
-        )
-
-    while current < required:
-        before = current
-
-        if log:
-            log(f"Adding NM vehicle unit {before + 1}...")
-
-        if not add_button.is_visible():
-            raise RuntimeError(
-                f"NM form has {before} vehicle unit(s), "
-                f"but requires {required}, and the Add Unit "
-                "button is not visible."
-            )
-
-        
-        add_button.scroll_into_view_if_needed(timeout=3000)
-        add_button.click(timeout=5000)
-
-        expected = before + 1
-
-        # Same approach as CA: wait until the unit count increases.
-        for _ in range(50):
-            page.wait_for_timeout(200)
-            current = tabs.count()
-            if current > before:
-                break
-        else:
-            raise RuntimeError(
-                f"Clicked the NM Add Unit button, but Unit "
-                f"{before + 1} did not appear."
-            )
-
-        # Small stabilization delay for the NM form's jQuery event handlers.
-        page.wait_for_timeout(300)
-        # Same approach as CA: wait until the unit count increases.
-        for _ in range(50):
-            page.wait_for_timeout(200)
-            current = tabs.count()
-
-            if current > before:
-                break
-        else:
-            raise RuntimeError(
-                f"Clicked the NM Add Unit button, but Unit "
-                f"{before + 1} did not appear."
-            )
-
-        # One click must create exactly one vehicle unit.
-        if current != before + 1:
-            raise RuntimeError(
-                "NM Add Unit created an unexpected number of tabs. "
-                f"Before: {before}; after: {current}."
-            )
-
-        if log:
-            log(f"NM vehicle unit {current} added.")
-
-    # Validate the first required tabs and their actual linked panels.
-    seen_panels = set()
-
-    for index in range(required):
-        unit_number = index + 1
-        tab = tabs.nth(index)
-
-        href = (tab.get_attribute("href") or "").strip()
-
-        if not href.startswith("#"):
-            raise RuntimeError(
-                f"NM Unit {unit_number} tab has an invalid "
-                f"panel reference: {href!r}"
-            )
-
-        if href in seen_panels:
-            raise RuntimeError(
-                f"NM Unit {unit_number} reuses panel {href!r}."
-            )
-
-        _nm_tab_panel(
-            section,
-            tab,
-            unit_number,
-        )
-
-        seen_panels.add(href)
+    ensure_tabs(page, section, required, spec=NM_TABS, log=log, label="NM vehicle unit")
 
 
 def _activate_nm_unit(section, number: int):
-    """
-    Activate an NM unit by tab order and return its linked panel.
-    Retries briefly because added jQuery UI tabs initialize asynchronously.
-    """
-    deadline = time.monotonic() + 8.0
-    last_error = None
-
-    while time.monotonic() < deadline:
-        try:
-            tabs = _nm_unit_tabs(section)
-            count = tabs.count()
-
-            if number > count:
-                raise RuntimeError(
-                    f"only {count} NM vehicle tab(s) are currently initialized"
-                )
-
-            tab = tabs.nth(number - 1)
-            href = (tab.get_attribute("href") or "").strip()
-
-            if not href.startswith("#"):
-                raise RuntimeError(
-                    f"NM Unit {number} tab has no valid href yet"
-                )
-
-            panel = section.locator(href)
-
-            if panel.count() != 1:
-                raise RuntimeError(
-                    f"NM Unit {number} panel {href!r} is not ready"
-                )
-
-            tab.scroll_into_view_if_needed(timeout=1000)
-            tab.click(timeout=2000)
-            panel.wait_for(state="visible", timeout=2000)
-
-            selected = tab.get_attribute("aria-selected")
-            hidden = panel.get_attribute("aria-hidden")
-
-            if selected == "false" or hidden == "true":
-                raise RuntimeError(
-                    f"NM Unit {number} has not become active yet"
-                )
-
-            return panel
-
-        except Exception as error:
-            last_error = error
-            time.sleep(0.2)
-
-    raise RuntimeError(
-        f"NM Unit {number} could not be activated after 8 seconds: "
-        f"{last_error}"
-    )
+    return shared_activate_tab(section, number, spec=NM_TABS, label="NM unit")
 
 
 

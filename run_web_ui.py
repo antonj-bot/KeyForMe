@@ -12,9 +12,10 @@ import time
 from pathlib import Path
 from queue import Empty
 from tempfile import TemporaryDirectory
-
+from playwright.sync_api import Error as PlaywrightError
 import uvicorn
 from playwright.sync_api import sync_playwright
+
 
 from app.browser.pdf_downloader import download_report_pdf_temporarily
 from app.ui import server as ui
@@ -326,10 +327,33 @@ def main():
                 try:
                     command = ui.commands.get_nowait()
                 except Empty:
-                    live = [p for p in context.pages if not p.is_closed()]
+                    live = [
+                        p for p in context.pages
+                        if not p.is_closed()
+                    ]
+
                     if not live:
                         break
-                    live[0].wait_for_timeout(200)
+
+                    try:
+                        live[0].wait_for_timeout(200)
+                    except PlaywrightError:
+                        # A page can close between the check and the wait.
+                        remaining = [
+                            p for p in context.pages
+                            if not p.is_closed()
+                        ]
+
+                        if not remaining:
+                            break
+
+                        # Another tab remains open; keep the session running.
+                        if live[0].is_closed():
+                            continue
+
+                        # Do not hide an unrelated Playwright failure.
+                        raise
+
                     continue
                 if command == "settings":
                     try:
@@ -343,7 +367,11 @@ def main():
                         messagebox.showinfo("KeyForMe", "Settings closed. KeyForMe will now exit. Double-click KeyForMe again to continue with the saved settings.")
                         root.destroy()
                     finally:
-                        context.close()
+                        try:
+                            context.close()
+                        except PlaywrightError as error:
+                            if type(error).__name__ != "TargetClosedError":
+                                raise
                     break
                 if command != "extract":
                     continue
@@ -365,7 +393,12 @@ def main():
                     traceback.print_exc()
                 finally:
                     ui.update(busy=False)
-            context.close()
+            try:
+                context.close()
+            except PlaywrightError as error:
+                # Closing an already-closed browser is normal during cleanup.
+                if type(error).__name__ != "TargetClosedError":
+                    raise   
     except KeyboardInterrupt:
         pass
     finally:

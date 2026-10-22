@@ -1,3 +1,13 @@
+
+# KeyForMe shared-core migration v1
+from app.core.tabs import unit_tabs, ensure_tabs, activate_tab as shared_activate_tab
+from app.core.vin import (
+    get_vin_policy,
+    should_attempt_vin_lookup,
+)
+# CA format rejection must be verified before opting into the NM fast path.
+CA_VIN_POLICY = VinPolicy(skip_invalid_format=False)
+
 # KeyForMe fix5
 import time
 
@@ -121,35 +131,16 @@ def select_radio_row(scope, row_text: str, value: str) -> None:
 # ---------------- tabs (units and other parties work the same way)
 
 def count_tabs(section) -> int:
-    hrefs = section.locator("a.ui-tabs-anchor").evaluate_all(
-        "els => els.map(e => e.getAttribute('href'))"
-    )
-    return len({h for h in hrefs if h})
+    return unit_tabs(section).count()
 
 
 def add_tabs(page: Page, section, add_selector: str, required: int, label: str) -> None:
-    add_button = form(page).locator(add_selector).first
-    while count_tabs(section) < required:
-        before = count_tabs(section)
-        if not add_button.is_visible():
-            raise RuntimeError(f"Form has {before} {label}(s) but needs {required}, "
-                               "and + is not clickable.")
-        add_button.click()
-        for _ in range(50):
-            if count_tabs(section) > before:
-                break
-            page.wait_for_timeout(200)
-        else:
-            raise RuntimeError(f"Clicked + but no new {label} appeared (still {before}).")
-        print(f"{label.capitalize()} {before + 1} added.")
+    add_control = form(page).locator(add_selector)
+    ensure_tabs(page, section, required, add_control=add_control, log=print, label=label)
 
 
-def activate_tab(section, number: int, label: str) -> None:
-    tab = section.locator(f"a.ui-tabs-anchor[href='#tabs-{number}']").first
-    if not tab.count():
-        raise RuntimeError(f"{label.capitalize()} {number} tab not found.")
-    tab.click()
-    section.locator(f"#tabs-{number}").first.wait_for(state="visible", timeout=10_000)
+def activate_tab(section, number: int, label: str):
+    return shared_activate_tab(section, number, label=label)
 
 
 # ---------------- people
@@ -295,31 +286,32 @@ def fill_vehicle(page: Page, section, vehicle: dict) -> None:
         _dialog["seen"] = False
         vin_box.fill(str(vin))
         vin_box.press("Tab")
-        vin_text = str(vin).upper()
-        if len(vin_text) != 17 or any(c in vin_text for c in "IOQ"):
-            print(f"  NOTE: VIN '{vin}' is keyed as printed, but the form will reject it "
-                  "(must be 17 characters, no I/O/Q). Check the report.")
-        if click_popup_ok(page):
-            decoded = field_has_value(
-                section,
-                VEHICLE["year"],
-            )
+        if should_attempt_vin_lookup(
+            vin, policy=get_vin_policy("CA"),
+            warn=lambda message: print("  NOTE: " + message),
+        ):
+            if click_popup_ok(page):
+                decoded = field_has_value(
+                    section,
+                    VEHICLE["year"],
+                )
 
-            print(
-                "  VIN popup: OK clicked"
-                + ("" if decoded else ", but year stayed blank")
-            )
+                print(
+                    "  VIN popup: OK clicked"
+                    + ("" if decoded else ", but year stayed blank")
+                )
 
-        else:
-            print("  WARNING: VIN popup OK button not found.")
+            else:
+                print("  WARNING: VIN popup OK button not found.")
 
-            # Show all frames and visible buttons for debugging.
-            debug_vin_popup(page)
+                # Show all frames and visible buttons for debugging.
+                debug_vin_popup(page)
 
-            print(
-                "  Continuing with year, make, and model "
-                "from the police report."
-            )
+                print(
+                    "  Continuing with year, make, and model "
+                    "from the police report."
+                )
+
 
     for key, value in vehicle.items():
         if key == "vin" or (decoded and key in YEAR_MAKE_MODEL):

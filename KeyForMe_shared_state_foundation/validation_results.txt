@@ -1,0 +1,10 @@
+Validation summary
+- All delivered Python files and migrated fixture sources parsed successfully.
+- Installer dry run and apply succeeded on an isolated fixture built from supplied source files.
+- The fixture used a minimal stub for the unavailable app/states/__init__.py; real registry integration remains to be tested locally.
+- Second installer run proposed no changes.
+- 17 shared-core offline unit tests passed using synthetic values and fake controls.
+- Existing NM dropdown catalog self-tests passed after migration.
+- Disabled-state scaffold generated syntactically valid Python.
+- Source-drift preflight rejected a changed function before writing files.
+- No real API, Windows credential, Chrome/eCrash, or frozen EXE execution was performed.

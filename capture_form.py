@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# KeyForMe shared-core migration v1
+from app.states import PIPELINES
+
+
 import argparse
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -109,7 +113,7 @@ def parse_args():
     parser.add_argument(
         "--state",
         required=True,
-        choices=("CA", "NM"),
+        choices=tuple(sorted(PIPELINES)),
         type=str.upper,
         help="State form to capture.",
     )
