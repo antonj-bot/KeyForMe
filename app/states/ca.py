@@ -1,6 +1,6 @@
 # KeyForMe fix2
-from app.browser.playwright_filler import fill_keying_form
-from app.extraction.openai_extractor import extract_chp555_fast
+from app.browser.engine import fill_form
+from app.extraction.ca_extractor import extract_chp555_fast
 from app.keying.ca_mapper import map_ca_keying
 from app.validation.rules import validate
 
@@ -20,4 +20,4 @@ def extract(pdf_path, model: str) -> dict:
 
 
 def fill(page, payload: dict) -> None:
-    fill_keying_form(page, payload)
+    fill_form(page, payload, state="CA", log=print)

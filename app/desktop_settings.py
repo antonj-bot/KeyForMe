@@ -7,6 +7,7 @@ from pathlib import Path
 
 SERVICE = "KeyForMe.OpenAI"
 ACCOUNT = "api-key"
+DEFAULT_PROVIDER = "openai"
 DEFAULT_MODEL = "gpt-6-luna"
 
 
@@ -42,6 +43,12 @@ def delete_key():
     if vault.get_password(SERVICE, ACCOUNT):
         vault.delete_password(SERVICE, ACCOUNT)
 
+
+def read_provider():
+    path = data_dir() / "settings.json"
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8")).get("provider") or DEFAULT_PROVIDER
+    return DEFAULT_PROVIDER
 
 def read_model():
     path = data_dir() / "settings.json"
@@ -105,7 +112,7 @@ def show_settings():
             elif not read_key():
                 messagebox.showerror("Settings", "Enter your API key", parent=window)
                 return
-            (data_dir()/"settings.json").write_text(json.dumps({"model":model},indent=2),encoding="utf-8")
+            (data_dir()/"settings.json").write_text(json.dumps({"provider": DEFAULT_PROVIDER, "model":model},indent=2),encoding="utf-8")
             key_var.set("")
             window.destroy()
         except Exception as exc:

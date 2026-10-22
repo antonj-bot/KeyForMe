@@ -1,8 +1,8 @@
-import sys
+﻿import sys
 
 from playwright.sync_api import sync_playwright
 
-from app.browser.playwright_filler import fill_keying_form
+from app.browser.engine import fill_form
 
 
 def fake_unit(n: int) -> dict:
@@ -40,6 +40,10 @@ with sync_playwright() as p:
     browser = p.chromium.launch(headless=False, slow_mo=150)
     page = browser.new_page()
     page.goto("http://localhost:8000/index.html")
-    fill_keying_form(page, payload)
+    fill_form(
+        page,
+        payload,
+        state="CA",
+    )
     print("Done. Check every unit tab, then close the Inspector.")
     page.pause()
