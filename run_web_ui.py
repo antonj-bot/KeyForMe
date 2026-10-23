@@ -25,7 +25,7 @@ from app import desktop_settings as settings
 from app.rid_export import RidExportController
 import time
 
-KEYING_URL = "https://keying-uat.green.usgov-ecrash-prod.azuregov.lnrsg.io/ecrash/"
+KEYING_URL = "https://azkeying.ecrash.lexisnexisrisk.com/ecrash/"
 DOWNLOAD_SELECTOR = "#download"
 
 
