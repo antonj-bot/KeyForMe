@@ -8,7 +8,8 @@ from datetime import date
 
 import pytest
 
-import nj_rules as nj  # in the project: from app.keying import nj_rules as nj
+from app.keying import nj_rules as nj
+import nj_fixtures as fx
 
 TODAY = date(2026, 10, 23)
 
@@ -126,7 +127,10 @@ def test_address_helpers():
     assert nj.split_address_line("156 TOWNLINE ROAD PEARL RIVER NY 10965")[2] == "PEARL RIVER"
     assert nj.split_address_line("1 MAIN ST APT 2 UTICA NY 13502") == ("1 MAIN ST", "APT 2", "UTICA", "NY", "13502")
     assert nj.split_address_line("9 ELM AVE UNIT 5B NEWARK NJ 07102") == ("9 ELM AVE", "UNIT 5B", "NEWARK", "NJ", "07102")
+    assert nj.split_address_line("346 JEFFERSON AVE, #2A, BROOKLYN, NY 11221") == ("346 JEFFERSON AVE", "#2A", "BROOKLYN", "NY", "11221")
+    assert nj.split_address_line("57 STATE ST, EAST ORANGE, NJ 07017-1117") == ("57 STATE ST", "", "EAST ORANGE", "NJ", "07017-1117")
     assert nj.split_address_line("no zip here") == ("no zip here", "", "", "", "")
+    assert nj.split_unit("63 ELMWOOD AVE, 2ND FL") == ("63 ELMWOOD AVE", "2ND FL")
 
 
 # ------------------------------------------------------------ vehicle helpers
@@ -143,6 +147,9 @@ def test_insurance_carrier_rule():
     assert nj.insurance_carrier("***", "STATE FARM") == "STATE FARM"   # asterisks: use the narrative
     assert nj.insurance_carrier("", "GEICO") == "GEICO"
     assert nj.insurance_carrier("*", "") == ""                         # nothing anywhere: blank
+    assert nj.insurance_carrier("*", "(NY) STATE FARM - Field 25") == "STATE FARM"   # narrative text is cleaned
+    assert nj.clean_narrative_value("(NY) STATE FARM - Field 55") == "STATE FARM"
+    assert nj.clean_narrative_value("993 FOR HIRE SELF INSURER") == "993 FOR HIRE SELF INSURER"
     assert nj.insurance_carrier(None, None) == ""
 
 
@@ -155,6 +162,20 @@ def test_towed_rule():
     assert nj.vehicle_towed({}) == "" and nj.vehicle_towed(None) == ""
 
 
+@pytest.mark.parametrize("raw,expected", [
+    ("NONE", "NONE"), ("none", "none"), ("498908407", "498908407"), ("R6094 25900 04611", "R6094 25900 04611"),
+    ("000000000", "000000000"),
+    ("UNKNOWN", ""), ("Unknown", ""), ("NA", ""), ("na", ""), ("N/A", ""), ("n/a", ""),
+    ("NOT APPLICABLE", ""), ("Not  Applicable", ""), ("-", ""), ("--", ""), ("***", ""), ("", ""), (None, ""),
+])
+def test_license_number_rule(raw, expected):
+    assert nj.license_number(raw) == expected
+
+
+def test_license_rule_is_only_for_the_license_field():
+    assert nj.text("NONE") == "" and nj.text("UNKNOWN") == ""            # other text fields keep the SOP null list
+
+
 def test_null_placeholders_are_not_keyed_in_text_fields():
     for v in ("NONE", "N/A", "UNK", "Unknown", "UU", "-", "***", "", None):
         assert nj.text(v) == ""
@@ -162,51 +183,42 @@ def test_null_placeholders_are_not_keyed_in_text_fields():
     assert nj.text("498908407") == "498908407"
 
 
-# ------------------------------------------------------------ the full mapper
+# ------------------------------------------------------------ the full mapper (synthetic report)
 def make_raw():
     return {
         "case_number": "X123202600001Z", "police_dept": "East Orange",
         "crash_date": "07/18/2026", "crash_time": "2058",
         "road_name": "Test Parkway", "cross_road": "", "speed_limit": "55",
-        "latitude": "40.1", "longitude": "-74.1",
-        "environmental_condition": "02", "road_surface_condition": "02",
-        "contributing": {"118a": "60", "118b": "-", "119a": "25", "119b": "-"},
-        "damage_boxes": {"130": "09", "131": "03", "132": "12", "133": "04"}, "has_box_134": True,
+        "latitude": "40.1", "longitude": "-74.1", "weather_code": "02", "road_condition_code": "02",
         "vehicles": [
-            {"number": 1, "parked": False, "hit_and_run": False, "ins_code": "000", "policy_number": "P-1",
-             "driver": {"first": "ANA", "middle": "", "last": "ROE", "dob": "12/24/89", "dl_number": "D123", "dl_state": "NY",
-                        "alcohol_given": "No", "address_1": "1 MAIN ST APT 2", "city": "UTICA", "state": "NY", "zip": "13502"},
-             "owner": {"same_as_driver": True, "first": "ANA", "middle": "", "last": "ROE",
-                       "address_1": "1 MAIN ST APT 2", "city": "UTICA", "state": "NY", "zip": "13502"},
-             "vehicle": {"vin": "1GNEVGRS3SJ26O58Q", "year": "2025", "make": "CHEVROLET", "model": "TRAVERSE", "plate": "ABC1", "plate_state": "NY"},
-             "removal": {"towed_disabled": True},
-             "charges": ["39:4-88B FAILED TO MAINTAIN LANE", "39:3-10 UNLICENSED DRIVER"]},
-            {"number": 2, "parked": False, "hit_and_run": True, "ins_code": "***", "narrative_insurance": "STATE FARM",
-             "driver": {"first": "BEN", "middle": "T", "last": "POE", "dl_number": "NONE", "dl_state": "NY", "alcohol_given": ""},
-             "owner": {"same_as_driver": False, "first": "BEN", "middle": "", "last": "POE", "address_1": "2 ELM ST", "city": "PEARL RIVER", "state": "NY", "zip": "10965"},
-             "vehicle": {"vin": "WMWSY3C59ET566252", "year": "2014", "make": "MINI", "model": "COOPER", "plate": "KYN5066", "plate_state": "NY"},
-             "removal": {"driven": True}},
-            {"number": 3, "parked": True,
-             "driver": {"first": "", "middle": "", "last": "", "alcohol_given": "No"},
-             "owner": {"same_as_driver": False, "first": "", "middle": "", "last": "Ean Holdings LLC", "address_1": "9 OAK AVE", "city": "TULSA", "state": "OK", "zip": "74134"},
-             "vehicle": {"vin": "NONE", "make": "FORD", "model": "EXPLORER", "plate": "G40LXS", "plate_state": "NJ"}},
+            fx.veh(1, ins="000", policy="P-1", charges=["39:4-88B FAILED TO MAINTAIN LANE", "39:3-10 UNLICENSED DRIVER"],
+                   driver_=fx.driver("ANA", "", "ROE", "12/24/89", "D123", "NY", "No", "1 MAIN ST APT 2", "UTICA", "NY", "13502"),
+                   owner_=fx.owner("ANA ROE", same=True, a1="1 MAIN ST APT 2", city="UTICA", state="NY", zip="13502"),
+                   vehicle_=fx.vehicle("1GNEVGRS3SJ26O58Q", "2025", "CHEVROLET", "TRAVERSE", "ABC1", "NY"),
+                   removal=dict(towed_disabled=True), damage_new="09", damage_old="03", contributing=["60", "-"]),
+            fx.veh(2, hit_and_run=True, ins="***", narr_ins="STATE FARM",
+                   driver_=fx.driver("BEN", "T", "POE", dl="NONE", alcohol=""),
+                   owner_=fx.owner("BEN POE", a1="2 ELM ST", city="PEARL RIVER", state="NY", zip="10965"),
+                   vehicle_=fx.vehicle("WMWSY3C59ET566252", "2014", "MINI", "COOPER", "KYN5066", "NY"),
+                   removal=dict(driven=True), damage_new="12", damage_old="06", contributing=["25", "-"]),
+            fx.veh(3, parked=True,
+                   driver_=fx.driver(alcohol="No"),
+                   owner_=fx.owner("Ean Holdings LLC", a1="9 OAK AVE", city="TULSA", state="OK", zip="74134"),
+                   vehicle_=fx.vehicle("NONE", "", "FORD", "EXPLORER", "G40LXS", "NJ")),
         ],
         "occupants": [
-            {"row": "A", "vehicle": "1", "position": "01", "ejection": "01", "injury": "04", "age": "36", "safety_available": "04",
-             "safety_used": "04", "airbag": "04", "hospital": ""},
-            {"row": "B", "vehicle": "1", "position": "03", "ejection": "01", "injury": "03", "age": "17", "safety_available": "04",
-             "safety_used": "04", "airbag": "04", "name": "JAY T STAPLETON", "address_line": "1 MAIN ST APT 2 UTICA NY 13502"},
-            {"row": "C", "vehicle": "1", "position": "07", "injury": "05", "airbag": "99", "name": "KAY STAPLETON",
-             "address": {"address_1": "77 FAR RD", "city": "UTICA", "state": "NJ", "zip": "13502"}},
-            {"row": "D", "vehicle": "2", "position": "01", "injury": "05", "age": "49", "airbag": "06"},
-            {"row": "E", "vehicle": "2", "position": "00", "name": "UNKNOWN"},
-            {"row": "F", "vehicle": "P", "position": "", "name": "WALT WALKER", "injury": "02"},
+            fx.occ("A", "01", "01", "01", "04", "36", "04", "04", "04"),
+            fx.occ("B", "01", "03", "01", "03", "17", "04", "04", "04", name="JAY T STAPLETON", address="1 MAIN ST APT 2 UTICA NY 13502"),
+            fx.occ("C", "01", "07", "", "05", "", "", "", "99", name="KAY STAPLETON"),
+            fx.occ("D", "02", "01", "", "05", "49", "", "", "06"),
+            fx.occ("E", "02", "00", "", "", "", "", "", "", name="UNKNOWN"),
+            fx.occ("F", "P", "", "", "02", "", "", "", "", name="WALT WALKER", address="3 PARK RD OSLO NY 10001"),
         ],
         "property_owners": [
-            {"name": "NJTA", "company": True},
-            {"name": "Karen Odonnell", "address_line": "5 RIVER RD TRENTON NJ 08601"},
-            {"name": "", "address_line": "8 PINE ST TRENTON NJ 08601"},
-            {"name": "", "address_line": ""},
+            dict(name="NJTA", is_company=True),
+            dict(name="Karen Odonnell", address_line="5 RIVER RD TRENTON NJ 08601"),
+            dict(name="", address_line="8 PINE ST TRENTON NJ 08601"),
+            dict(name="", address_line=""),
         ],
     }
 
@@ -232,35 +244,35 @@ def test_no_hit_and_run_means_blank():
     assert nj.map_nj(raw, today=TODAY)["incident"]["hit_and_run"] == ""
 
 
-def test_unit_1_driver_owner_vehicle(out):
+def test_unit_1(out):
     u = out["units"][0]
-    assert u["driver"]["first_name"] == "ANA" and u["driver"]["date_of_birth"] == "12/24/1989"      # age 36 in 2026
-    assert u["driver"]["injury_code"] == "04" and u["driver"]["ejection"] == "01"
-    assert u["driver"]["safety_available"] == "04" and u["driver"]["alcohol_test"] == "No"
-    assert u["driver"]["address_1"] == "1 MAIN ST" and u["driver"]["address_2"] == "APT 2"
-    assert u["driver"]["charge"] == ["39:4-88B FAILED TO MAINTAIN LANE", "39:3-10 UNLICENSED DRIVER"]
-    assert (u["owner"]["first_name"], u["owner"]["last_name"]) == ("ANA", "ROE")                     # same as driver
-    assert u["owner"]["address_1"] == "1 MAIN ST"                                                    # owner address as printed
+    d = u["driver"]
+    assert d["first_name"] == "ANA" and d["date_of_birth"] == "12/24/1989"          # age 36 in 2026 -> 1989
+    assert d["injury_code"] == "04" and d["ejection"] == "01" and d["safety_available"] == "04" and d["alcohol_test"] == "No"
+    assert (d["address_1"], d["address_2"]) == ("1 MAIN ST", "APT 2")
+    assert d["charge"] == "39:4-88B FAILED TO MAINTAIN LANE" and d["extra_charges"] == ["39:3-10 UNLICENSED DRIVER"]
+    assert (u["owner"]["first_name"], u["owner"]["last_name"]) == ("ANA", "ROE")      # Same As Driver: names only
+    assert u["owner"]["address_1"] == "1 MAIN ST"                                      # owner address as printed
     v = u["vehicle"]
-    assert v["vin"] == "1GNEVGRS3SJ260580"                                                           # O and Q replaced
-    assert v["insurance_carrier"] == "000" and v["vehicle_towed"] == "YES"
-    assert v["airbag_deployed"] == "YES" and v["contributing"] == "60" and v["impact_location"] == "Left Side"
+    assert v["vin"] == "1GNEVGRS3SJ260580"                                            # O and Q replaced
+    assert v["insurance_carrier"] == "000" and v["vehicle_towed"] == "YES" and v["airbag_deployed"] == "YES"
+    assert v["contributing"] == "60" and v["impact_location"] == "Left Side"
 
 
 def test_unit_2_rules(out):
     u = out["units"][1]
-    assert u["driver"]["drivers_license"] == "" and u["driver"]["alcohol_test"] == ""                # NONE is not keyed
+    assert u["driver"]["drivers_license"] == "NONE" and u["driver"]["alcohol_test"] == ""        # NONE is keyed as printed
     assert u["vehicle"]["insurance_carrier"] == "STATE FARM" and u["vehicle"]["vehicle_towed"] == "NO"
     assert u["vehicle"]["airbag_deployed"] == "NO" and u["vehicle"]["contributing"] == "25"
     assert u["vehicle"]["impact_location"] == "Front"
-    assert u["owner"]["last_name"] == "POE" and u["owner"]["address_1"] == "2 ELM ST"
+    assert u["owner"]["last_name"] == "POE" and u["owner"]["first_name"] == "BEN"
 
 
 def test_parked_unit_keys_parked_and_other_details(out):
     u = out["units"][2]
     assert u["driver"]["last_name"] == "PARKED" and u["driver"]["first_name"] == ""
-    assert u["driver"]["alcohol_test"] == "No"                                                       # other details still keyed
-    assert u["owner"]["last_name"] == "Ean Holdings LLC" and u["owner"]["first_name"] == ""          # company -> last name
+    assert u["driver"]["alcohol_test"] == "No"                                                    # other details still keyed
+    assert u["owner"]["last_name"] == "Ean Holdings LLC" and u["owner"]["first_name"] == ""        # company -> last name
     assert u["vehicle"]["vin"] == "" and u["vehicle"]["contributing"] == "" and u["vehicle"]["impact_location"] == ""
 
 
@@ -269,32 +281,50 @@ def test_parked_with_names_keys_names_and_unknown_is_kept():
     raw["vehicles"][2]["driver"].update(first="CAL", last="DOE")
     assert nj.map_nj(raw, today=TODAY)["units"][2]["driver"]["last_name"] == "DOE"
     raw["vehicles"][2]["driver"].update(first="", last="Unknown")
-    assert nj.map_nj(raw, today=TODAY)["units"][2]["driver"]["last_name"] == "Unknown"          # KWYS
+    assert nj.map_nj(raw, today=TODAY)["units"][2]["driver"]["last_name"] == "Unknown"           # KWYS
     raw["vehicles"][2]["parked"] = False
     raw["vehicles"][2]["driver"].update(first="", last="")
-    assert nj.map_nj(raw, today=TODAY)["units"][2]["driver"]["last_name"] == ""                   # not parked: no PARKED
+    assert nj.map_nj(raw, today=TODAY)["units"][2]["driver"]["last_name"] == ""                    # not parked: no PARKED
+
+
+def test_driver_name_falls_back_to_occupant_row():
+    raw = make_raw()
+    raw["vehicles"][0]["driver"].update(first="", middle="", last="")
+    raw["occupants"][0]["name"] = "ROE, ANA"
+    d = nj.map_nj(raw, today=TODAY)["units"][0]["driver"]
+    assert (d["first_name"], d["last_name"]) == ("ANA", "ROE")
 
 
 def test_same_as_driver_never_copies_the_parked_placeholder():
     raw = make_raw()
-    raw["vehicles"][2]["owner"].update(same_as_driver=True, last="")
-    assert nj.map_nj(raw, today=TODAY)["units"][2]["owner"]["last_name"] == ""
+    raw["vehicles"][2]["owner"].update(same_as_driver=True, name="")
+    o = nj.map_nj(raw, today=TODAY)["units"][2]["owner"]
+    assert o["last_name"] == "" and o["first_name"] == ""
 
 
 def test_other_parties(out):
     parties = out["other_parties"]
-    by_name = {p["last_name"]: p for p in parties}
     jay = next(p for p in parties if p["first_name"] == "JAY")
-    assert (jay["person_type"], jay["first_name"], jay["middle_name"], jay["vehicle_number"]) == ("Passenger", "JAY", "T", "1")
-    assert jay["injury_code"] == "03" and jay["safety_used"] == "04"
-    assert jay["address_1"] == "1 MAIN ST" and jay["address_2"] == "APT 2" and jay["city"] == "UTICA"
-    assert jay["same_as_driver_address"] is True                              # same address as unit 1's driver
+    assert (jay["person_type"], jay["role"], jay["party_number"]) == ("Passenger", "PASSENGER", "1")
+    assert (jay["middle_name"], jay["last_name"]) == ("T", "STAPLETON") and jay["injury_code"] == "03"
+    # a printed address is keyed (KWYS) and the Same As boxes are NOT ticked
+    assert (jay["address_1"], jay["address_2"], jay["city"]) == ("1 MAIN ST", "APT 2", "UTICA")
+    assert jay["same_as_driver_address"] is False and jay["same_as_owner_address"] is False
+    # no address printed -> tick Same As Driver (the driver of vehicle 1 has an address)
     kay = next(p for p in parties if p["first_name"] == "KAY")
-    assert kay["person_type"] == "Passenger" and kay["same_as_driver_address"] is False and kay["state"] == "NJ"
-    unk = by_name["UNKNOWN"]
-    assert unk["person_type"] == "Unknown" and unk["vehicle_number"] == "2"   # seating position 0
-    ped = by_name["WALKER"]
-    assert ped["person_type"] == "Pedestrian" and ped["vehicle_number"] == "" and ped["injury_code"] == "02"
+    assert kay["person_type"] == "Passenger" and kay["address_1"] == "" and kay["same_as_driver_address"] is True
+    unk = next(p for p in parties if p["last_name"] == "UNKNOWN")
+    assert unk["person_type"] == "Unknown" and unk["party_number"] == "2"                       # seating position 0
+    ped = next(p for p in parties if p["last_name"] == "WALKER")
+    assert ped["person_type"] == "Pedestrian" and ped["party_number"] == "" and ped["address_1"] == "3 PARK RD"
+    assert ped["same_as_driver_address"] is False                                               # no vehicle -> never ticked
+
+
+def test_no_address_and_driver_has_none_ticks_owner():
+    raw = make_raw()
+    raw["vehicles"][0]["driver"].update(address_1="", city="", state="", zip="")
+    kay = next(p for p in nj.map_nj(raw, today=TODAY)["other_parties"] if p["first_name"] == "KAY")
+    assert kay["same_as_driver_address"] is False and kay["same_as_owner_address"] is True
 
 
 def test_drivers_are_not_duplicated_as_other_parties(out):
@@ -304,8 +334,8 @@ def test_drivers_are_not_duplicated_as_other_parties(out):
 
 def test_property_owners(out):
     props = [p for p in out["other_parties"] if p["person_type"] == "Property Owner"]
-    assert len(props) == 3                                                   # the empty one is skipped
-    assert props[0]["last_name"] == "NJTA" and props[0]["first_name"] == ""   # company -> last name only
+    assert len(props) == 3 and all(p["role"] == "PROPERTY OWNER" for p in props)                # the empty one is skipped
+    assert props[0]["last_name"] == "NJTA" and props[0]["first_name"] == ""
     assert (props[1]["first_name"], props[1]["last_name"]) == ("Karen", "Odonnell")
     assert props[1]["address_1"] == "5 RIVER RD" and props[1]["city"] == "TRENTON" and props[1]["zip_code"] == "08601"
     assert props[2]["first_name"] == "" and props[2]["last_name"] == "" and props[2]["address_1"] == "8 PINE ST"
@@ -314,27 +344,30 @@ def test_property_owners(out):
 
 def test_older_form_without_box_134_uses_131_and_133():
     raw = make_raw()
-    raw["has_box_134"] = False                                               # boxes 131 (V1) and 133 (V2)
+    raw["vehicles"][0]["damage"]["new_form"] = False
+    raw["vehicles"][1]["damage"]["new_form"] = False
     units = nj.map_nj(raw, today=TODAY)["units"]
-    assert units[0]["vehicle"]["impact_location"] == "Right Side"            # 131 = 03
-    assert units[1]["vehicle"]["impact_location"] == "Right Rear"            # 133 = 04
+    assert units[0]["vehicle"]["impact_location"] == "Right Side"            # old box 03
+    assert units[1]["vehicle"]["impact_location"] == "Rear"                  # old box 06
 
 
 def test_unrecognised_codes_blank_the_field_and_add_a_note():
     raw = make_raw()
-    raw["environmental_condition"] = "77"
+    raw["weather_code"] = "77"
     raw["occupants"][0]["injury"] = "09"
+    raw["occupants"][2]["airbag"] = "09"
     out = nj.map_nj(raw, today=TODAY)
     assert out["incident"]["weather"] == "" and out["units"][0]["driver"]["injury_code"] == ""
     assert any("Weather" in n for n in out["notes"]) and any("injury" in n for n in out["notes"])
+    assert any("airbag code '09'" in n for n in out["notes"])
 
 
-def test_dashes_do_not_create_notes():
+def test_dashes_and_99_do_not_create_notes():
     raw = make_raw()
-    raw["environmental_condition"] = "-"
+    raw["weather_code"] = "-"
     raw["occupants"][0]["injury"] = "-"
     notes = nj.map_nj(raw, today=TODAY)["notes"]
-    assert not any("Weather" in n or "injury" in n for n in notes)
+    assert not any("Weather" in n or "injury" in n or "airbag" in n for n in notes)
 
 
 def test_one_line_address_split_adds_review_note(out):
@@ -357,3 +390,152 @@ def test_units_are_ordered_by_vehicle_number():
     raw = make_raw()
     raw["vehicles"].reverse()
     assert [u["party_number"] for u in nj.map_nj(raw, today=TODAY)["units"]] == [1, 2, 3]
+
+
+def test_policy_falls_back_to_narrative_when_asterisk():
+    raw = make_raw()
+    raw["vehicles"][0]["policy_number"] = "*"
+    raw["vehicles"][0]["narrative_policy"] = "ABC-123 - Field 24"
+    assert nj.map_nj(raw, today=TODAY)["units"][0]["vehicle"]["policy_number"] == "ABC-123"
+
+
+def test_city_box_holding_city_state_zip_is_split():
+    raw = make_raw()
+    raw["vehicles"][0]["driver"].update(city="Passaic, NJ 07055-5114", state="", zip="")
+    d = nj.map_nj(raw, today=TODAY)["units"][0]["driver"]
+    assert (d["city"], d["state"], d["zip_code"]) == ("Passaic", "NJ", "07055-5114")
+
+
+def test_owner_boxes_still_work_without_a_single_name_string():
+    raw = make_raw()
+    raw["vehicles"][1]["owner"] = dict(first="PEACE", middle="", last="BLEWUADAH", address_1="1 X ST")
+    o = nj.map_nj(raw, today=TODAY)["units"][1]["owner"]
+    assert (o["first_name"], o["last_name"]) == ("PEACE", "BLEWUADAH")
+
+
+def test_company_flag_from_the_extractor_beats_the_word_list():
+    raw = make_raw()
+    raw["vehicles"][1]["owner"] = fx.owner("ACME TOWING", company=True)
+    assert nj.map_nj(raw, today=TODAY)["units"][1]["owner"]["last_name"] == "ACME TOWING"
+    raw["vehicles"][1]["owner"] = fx.owner("ACME TOWING")
+    assert nj.map_nj(raw, today=TODAY)["units"][1]["owner"]["first_name"] == "ACME"      # no flag, no keyword: person-style split
+
+
+# ------------------------------------------------------------ the six sample reports
+def run(name):
+    return nj.map_nj(fx.ALL[name], today=TODAY)
+
+
+def test_standard_report():
+    o = run("STANDARD")
+    inc = o["incident"]
+    assert (inc["report_identifier_1"], inc["incident_city"], inc["incident_date"], inc["time_2400"]) == \
+        ("D040202602475C", "New Jersey State Police", "07/18/2026", "20:58")
+    u1, u2 = o["units"]
+    assert u1["vehicle"]["insurance_carrier"] == "000" and u2["vehicle"]["insurance_carrier"] == "000"   # 000 is keyed as 000
+    assert (u1["vehicle"]["vehicle_towed"], u2["vehicle"]["vehicle_towed"]) == ("YES", "NO")
+    assert (u1["vehicle"]["airbag_deployed"], u2["vehicle"]["airbag_deployed"]) == ("YES", "NO")
+    assert (u1["vehicle"]["contributing"], u2["vehicle"]["contributing"]) == ("60", "25")
+    assert (u1["vehicle"]["impact_location"], u2["vehicle"]["impact_location"]) == ("Left Side", "Left Side")
+    assert (u1["driver"]["injury_code"], u1["driver"]["ejection"], u1["driver"]["safety_used"]) == ("04", "01", "04")
+    assert (u2["owner"]["first_name"], u2["owner"]["middle_name"], u2["owner"]["last_name"]) == ("MICHEAL", "T", "PAINE")
+    assert o["incident"]["hit_and_run"] == ""
+    parties = o["other_parties"]
+    assert [(p["person_type"], p["first_name"], p["party_number"]) for p in parties] == [
+        ("Passenger", "JAYDEN", "1"), ("Passenger", "CAYSEN", "1"), ("Property Owner", "", "")]
+    assert parties[0]["state"] == "NJ" and parties[0]["address_1"] == "415 BUCHANAN RD"          # printed state is keyed as printed
+    assert parties[0]["same_as_driver_address"] is False
+    assert parties[2]["last_name"] == "NJTA"
+    assert not o["notes"] or all("split from one line" in n for n in o["notes"])
+
+
+def test_three_units_report():
+    o = run("THREE_UNITS")
+    assert o["incident"]["incident_date"] == "08/08/2026" and o["incident"]["incident_cross_street"] == "ELM AVENUE"
+    u1, u2, u3 = o["units"]
+    assert u1["driver"]["date_of_birth"] == "08/04/1993"                      # "93" + age 33 -> 1993
+    assert (u1["driver"]["first_name"], u1["driver"]["middle_name"], u1["driver"]["last_name"]) == ("TYRIK", "CHARLES", "JONES")
+    assert u1["driver"]["injury_code"] == "03"
+    assert (u1["driver"]["address_1"], u1["driver"]["address_2"]) == ("399 BRISTOL ST", "APT C")
+    assert u1["driver"]["charge"] == "39:4-88B FAILED TO MAINTAIN LANE" and len(u1["driver"]["extra_charges"]) == 3
+    assert (u1["owner"]["first_name"], u1["owner"]["middle_name"], u1["owner"]["last_name"]) == ("ERIC", "M", "LOPEZ")
+    assert u1["owner"]["address_2"] == "APT 2B"
+    assert u1["vehicle"]["insurance_carrier"] == "RentalCover.com"            # code was "*": narrative value
+    assert u1["vehicle"]["impact_location"] == "Front" and u2["vehicle"]["impact_location"] == "Left Rear"
+    assert u1["vehicle"]["contributing"] == "14;4"
+    assert (u2["owner"]["first_name"], u2["owner"]["last_name"]) == ("MAYRA", "BERMEO-ALTAMIRANO")  # Same As Driver
+    assert u2["driver"]["drivers_license_state"] == "NJ"
+    # unit 3 is on the second unit page and is parked with owner details only
+    assert u3["driver"]["last_name"] == "PARKED" and u3["driver"]["drivers_license"] == "NONE" and u3["vehicle"]["vehicle_towed"] == "NO"
+    assert u3["owner"]["last_name"] == "PALOMEQUEPACHECO" and u3["owner"]["first_name"] == "JAIME" and u3["owner"]["middle_name"] == "G"
+    assert u3["vehicle"]["impact_location"] == "Right Front" and u3["vehicle"]["contributing"] == "25;1"
+    ems = next(p for p in o["other_parties"] if p["last_name"] == "EMANUEL")
+    assert (ems["first_name"], ems["middle_name"], ems["person_type"], ems["party_number"]) == ("JABARI", "SHAHKIR", "Passenger", "1")
+    assert (ems["address_1"], ems["address_2"], ems["city"], ems["state"], ems["zip_code"]) == \
+        ("346 JEFFERSON AVE", "#2A", "BROOKLYN", "NY", "11221")
+    prop = [p for p in o["other_parties"] if p["person_type"] == "Property Owner"]
+    assert len(prop) == 1 and prop[0]["first_name"] == "" and prop[0]["last_name"] == "" and prop[0]["address_1"] == "746 BERGEN BLVD"
+
+
+def test_violation_report():
+    o = run("VIOLATION")
+    assert o["incident"]["hit_and_run"] == "1" and o["incident"]["time_2400"] == "00:40"
+    u1, u2 = o["units"]
+    assert u1["driver"]["charge"] == "39:4-97 - Careless Driving" and len(u1["driver"]["extra_charges"]) == 6
+    assert u1["owner"]["last_name"] == "Ean Holdings LLC" and u1["owner"]["first_name"] == ""
+    assert u1["vehicle"]["policy_number"] == ""                                # "UNKNOWN" is a null value in a text field
+    assert u1["vehicle"]["insurance_carrier"] == "000" and u1["vehicle"]["vehicle_towed"] == "YES"
+    assert u1["vehicle"]["impact_location"] == "Multiple"                      # box 15 = overturned
+    assert u1["driver"]["ejection"] == "" and u1["driver"]["safety_used"] == ""   # printed "00" is not an NJ code
+    assert u1["driver"]["hospital"] == "6501"
+    assert u2["driver"]["last_name"] == "PARKED" and u2["driver"]["alcohol_test"] == ""
+    assert (u2["owner"]["first_name"], u2["owner"]["middle_name"], u2["owner"]["last_name"], u2["owner"]["suffix"]) == \
+        ("Richard", "B", "McKelvey", "III")
+    assert u2["vehicle"]["contributing"] == "25" and u2["vehicle"]["impact_location"] == "Right Rear"
+    props = [p for p in o["other_parties"] if p["person_type"] == "Property Owner"]
+    assert [(p["first_name"], p["last_name"]) for p in props] == [("Karen", "Odonnell"), ("", "Jersey Central Power & Light")]
+    assert any("ejection" in n for n in o["notes"])
+
+
+def test_four_unit_report():
+    o = run("FOUR_UNITS")
+    assert [u["party_number"] for u in o["units"]] == [1, 2, 3, 4]
+    u1, u2, u3, u4 = o["units"]
+    assert u1["driver"]["date_of_birth"] == "05/13/2006"                       # "06" -> 2006
+    assert u2["driver"]["date_of_birth"] == "03/04/1991"
+    assert u1["vehicle"]["airbag_deployed"] == "YES" and u1["vehicle"]["vehicle_towed"] == "YES"
+    assert u1["driver"]["hospital"] == "5707" and u1["driver"]["injury_code"] == "03"
+    assert u2["driver"]["address_1"] == "63 ELMWOOD AVE" and u2["driver"]["address_2"] == "2ND FL"
+    assert (u3["driver"]["last_name"], u4["driver"]["last_name"]) == ("PARKED", "PARKED")
+    assert u3["driver"]["drivers_license"] == "NONE" and u4["driver"]["drivers_license"] == ""   # printed NONE is keyed
+    assert (u3["owner"]["first_name"], u3["owner"]["last_name"]) == ("THOMAS", "MERRITT")
+    assert u3["owner"]["address_2"] == "APT. 4A" and u3["vehicle"]["impact_location"] == "Left Front"
+    assert u4["vehicle"]["impact_location"] == "Right Rear" and u4["vehicle"]["vehicle_towed"] == "NO"
+    assert u3["vehicle"]["airbag_deployed"] == "" and u3["vehicle"]["insurance_carrier"] == "945"
+    assert [p for p in o["other_parties"] if p["person_type"] == "Property Owner"] == []   # parked cars are units, not property
+    assert o["other_parties"] == []
+
+
+def test_veh2_parked_report():
+    o = run("VEH2_PARKED")
+    u1, u2 = o["units"]
+    assert u1["owner"]["first_name"] == "Ebenezer" and u1["owner"]["last_name"] == "Goodlin"
+    assert u1["vehicle"]["airbag_deployed"] == "NO" and u1["vehicle"]["insurance_carrier"] == "000"
+    assert u1["driver"]["date_of_birth"] == "12/16/1950" and u1["driver"]["injury_code"] == "05"
+    assert u2["driver"]["last_name"] == "PARKED"
+    assert (u2["owner"]["first_name"], u2["owner"]["last_name"], u2["owner"]["city"]) == ("Peace", "Blewuadah", "Trenton")
+    assert (u1["vehicle"]["impact_location"], u2["vehicle"]["impact_location"]) == ("Front", "Rear")
+    assert o["incident"]["incident_date"] == "08/10/2026" and o["incident"]["time_2400"] == "09:50"
+
+
+def test_normal_two_unit_report_with_city_state_zip_in_one_box():
+    o = run("NORMAL_2")
+    assert o["incident"]["incident_date"] == "06/09/2026" and o["incident"]["time_2400"] == "16:01"
+    u1, u2 = o["units"]
+    assert (u1["driver"]["city"], u1["driver"]["state"], u1["driver"]["zip_code"]) == ("Passaic", "NJ", "07055-5114")
+    assert u2["driver"]["address_2"] == "Apt 2" and u2["driver"]["address_1"] == "119 Jefferson St"
+    assert u1["driver"]["date_of_birth"] == "04/30/1961"                       # "61" with age 65 -> 1961
+    assert (u2["owner"]["first_name"], u2["owner"]["last_name"]) == ("Eusebio", "Mejia")
+    assert u1["driver"]["drivers_license"] == "R6094 25900 04611"
+    assert o["other_parties"] == []                                            # no passengers
+    assert (u1["vehicle"]["year"], u2["vehicle"]["year"]) == ("08", "17")      # printed two-digit years are keyed as printed

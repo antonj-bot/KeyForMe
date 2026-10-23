@@ -16,6 +16,7 @@ class ReportID(BaseModel):
 # Known forms: (state, form name, any of these phrases on page 1)
 FORM_SIGNATURES = [
     ("CA", "CHP 555", ("CHP 555", "CALIFORNIA HIGHWAY PATROL")),
+    ("NJ", "NJTR-1", ("NEW JERSEY POLICE CRASH INVESTIGATION REPORT", "NJTR-1")),
     ("TX", "CR-3", ("TEXAS PEACE OFFICER", "CR-3 ")),
 ]
 
@@ -67,7 +68,8 @@ def detect_from_image(page, model: str) -> ReportID:
         instructions=(
             "This is the top of a police crash report. Read the printed "
             "header text only. Return the state exactly as printed "
-            "(e.g. 'STATE OF CALIFORNIA' -> CA), the form name or number "
+            "(e.g. 'STATE OF CALIFORNIA' -> CA; 'New Jersey Police Crash Investigation "
+            "Report' -> NJ), the form name or number "
             "exactly as printed, and the agency. If the header does not "
             "print a state, return null. Never guess from layout."
         ),

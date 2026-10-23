@@ -44,6 +44,9 @@ document.addEventListener("click", event => {
 
     event.preventDefault();
 
+    anchor.closest("ul").querySelectorAll("li").forEach(item =>
+        item.setAttribute("aria-selected", item.contains(anchor) ? "true" : "false"));
+
     const targetId = href.slice(1);
 
     section

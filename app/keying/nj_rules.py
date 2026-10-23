@@ -6,41 +6,44 @@ here, so it can be unit-tested without a browser or a PDF.
 
 Place at:  app/keying/nj_rules.py
 
-Raw input (what the NJ extractor will return; one dict, values as printed)
+Raw input (what app/extraction/nj_extractor.py returns; values as printed)
 --------------------------------------------------------------------------
 {
-  "case_number": "D040202602475C",  "police_dept": "East Orange",
-  "crash_date": "07/18/2026",       "crash_time": "2058",
-  "road_name": "Garden State Parkway", "cross_road": "", "speed_limit": "55",
-  "latitude": "40.886591",          "longitude": "-74.151818",
-  "environmental_condition": "02",  # box 103
-  "road_surface_condition": "02",   # box 102
-  "contributing": {"118a": "60", "118b": "-", "119a": "25", "119b": "-"},
-  "damage_boxes": {"130": "09", "131": "09", "132": "09", "133": "04"},
-  "has_box_134": true,              # new form (rev 01/22) shows boxes up to 134
+  "case_number": "D040202602475C", "police_dept": "East Orange",
+  "crash_date": "07/18/2026", "crash_time": "2058",
+  "road_name": "...", "cross_road": "", "speed_limit": "55",
+  "latitude": "...", "longitude": "...",
+  "weather_code": "02",            # margin box 103
+  "road_condition_code": "02",     # margin box 102
   "vehicles": [{
       "number": 1, "parked": false, "hit_and_run": false,
-      "policy_number": "...", "ins_code": "000", "narrative_insurance": "",
+      "policy_number": "...", "ins_code": "000",
+      "narrative_insurance": "", "narrative_policy": "",
       "driver": {"first": "", "middle": "", "last": "", "dob": "", "dl_number": "",
-                 "dl_state": "", "alcohol_given": "No",
-                 "address_1": "", "address_2": "", "city": "", "state": "", "zip": ""},
-      "owner":  {"same_as_driver": false, "first": "", "middle": "", "last": "",
-                 "address_1": "", ...},
+                 "dl_state": "", "alcohol_given": "No", "address_1": "", "address_2": "",
+                 "city": "", "state": "", "zip": ""},
+      "owner":  {"same_as_driver": false, "name": "Richard B McKelvey III",
+                 "is_company": null, "address_1": "", "city": "", "state": "", "zip": ""},
       "vehicle": {"vin": "", "year": "", "make": "", "model": "",
                   "plate": "", "plate_state": ""},
       "removal": {"driven": true, "left_at_scene": false, "towed_disabled": false,
                   "towed_disabled_impounded": false, "towed_impounded": false},
-      "charges": ["39:4-88B FAILED TO MAINTAIN LANE"]
+      "charges": ["39:4-88B FAILED TO MAINTAIN LANE"],
+      # damage and contributing circumstances belong to the PAGE the vehicle is on
+      # (left vehicle: boxes 130/131 and 118a/118b; right vehicle: 132/133 and 119a/119b)
+      "damage": {"new": "09", "old": "03", "new_form": true},
+      "contributing": ["60", "-"]
   }],
-  "occupants": [{"vehicle": "1", "position": "01", "ejection": "01", "injury": "04",
-                 "age": "36", "safety_available": "04", "safety_used": "04",
-                 "airbag": "04", "hospital": "", "name": "JULIA HARRISON",
-                 "address": {...} or "address_line": "415 BUCHANAN RD UTICA NY 13502"}],
-  "property_owners": [{"name": "NJTA", "address_line": "", "company": true}]
+  "occupants": [{"row": "A", "vehicle": "1", "position": "01", "ejection": "01",
+                 "injury": "04", "age": "36", "safety_available": "04",
+                 "safety_used": "04", "airbag": "04", "hospital": "",
+                 "name": "JULIA HARRISON", "address_line": "415 BUCHANAN RD UTICA NY 13502"}],
+  "property_owners": [{"name": "NJTA", "address_line": "", "is_company": true}]
 }
 
-Output payload keys follow the draft NJ form spec: incident / units / other_parties /
-notes, plus per-person "same_as_*_address" booleans for other parties.
+Output payload keys follow the NJ form spec: incident / units / other_parties / notes.
+Other parties carry "role" and "party_number" (what the shared engine reads) as well as
+the readable "person_type" / "vehicle_number".
 """
 from __future__ import annotations
 
@@ -67,6 +70,18 @@ def blank_like(value) -> bool:
 def text(value) -> str:
     """Non-name text field: null placeholders are not keyable (General SOP)."""
     return "" if blank_like(value) else _s(value)
+
+
+_LICENSE_NULL = {"UNKNOWN", "NA", "N/A", "NOTAPPLICABLE"}
+
+
+def license_number(value) -> str:
+    """Driver's licence number: key what you see, so "NONE" is keyed. Only UNKNOWN, NA, N/A
+    and NOT APPLICABLE (and boxes holding just dashes or asterisks) are left blank."""
+    t = _s(value)
+    if not re.search(r"[A-Za-z0-9]", t) or re.sub(r"\s+", "", t).upper() in _LICENSE_NULL:
+        return ""
+    return t
 
 
 def name_part(value) -> str:
@@ -127,7 +142,7 @@ def contributing(codes) -> str:
     return ";".join(out)          # multi-select separator: confirm on the live form
 
 
-# Airbag deployment (box 94): 1-4, 7-8 YES; 5-6 NO; 99 NA (user's table).
+# Airbag deployment (box 94): 1-4 and 7-8 YES; 5 and 6 NO; 99 NA (blank). Any other code is blank.
 def airbag(codes) -> str:
     nums = [n for n in (_num(c) for c in codes) if n is not None]
     if any(n in (1, 2, 3, 4, 7, 8) for n in nums):
@@ -135,6 +150,9 @@ def airbag(codes) -> str:
     if any(n in (5, 6) for n in nums):
         return "NO"
     return ""
+
+
+_AIRBAG_KNOWN = {1, 2, 3, 4, 5, 6, 7, 8, 99}
 
 
 # Principal Damage clock value -> form option text (NJ guide matrix, single X rows).
@@ -260,6 +278,7 @@ def person_from_boxes(first, middle, last, *, company_check: bool = False) -> di
 # ----------------------------------------------------------------- addresses
 _UNIT_RE = re.compile(
     r"[\s,]+((?:APT|APARTMENT|UNIT|STE|SUITE|SPC|SPACE|LOT|RM|ROOM|FL|FLOOR|BLDG|BUILDING|TRLR|TRAILER)\.?\s*#?\s*[A-Z0-9-]+"
+    r"|\d+(?:ST|ND|RD|TH)\s+(?:FL|FLOOR)\.?"
     r"|#\s*[A-Z0-9-]+|P\.?\s?O\.?\s*BOX\s*\d+)$", re.I)
 _STREET_SUFFIX = {
     "ST", "STREET", "RD", "ROAD", "AVE", "AVENUE", "BLVD", "BOULEVARD", "DR", "DRIVE", "LN", "LANE",
@@ -289,6 +308,15 @@ def split_address_line(line: str) -> tuple[str, str, str, str, str]:
     """Best-effort split of '415 BUCHANAN RD UTICA NY 13502'. The extractor should return
     the parts separately; this is only a fallback and callers add a review note."""
     t = _s(line)
+    parts = [x.strip() for x in t.split(",") if x.strip()]
+    if len(parts) >= 3:                                   # "street[, unit], city, ST 12345"
+        m_sz = re.fullmatch(r"([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)", parts[-1])
+        if m_sz:
+            unit = ", ".join(parts[1:-2])
+            a1, a2 = parts[0], unit
+            if not a2:
+                a1, a2 = split_unit(a1)
+            return a1, a2, parts[-2], m_sz[1].upper(), m_sz[2]
     m = _CSZ_RE.match(t)
     if not m:
         return t, "", "", "", ""
@@ -316,6 +344,8 @@ def _address(src: dict | None, who: str, notes: list[str]) -> dict:
     csz = _s(d.get("city_state_zip"))
     if csz and not (city or st or zp):
         city, st, zp = split_city_state_zip(csz)
+    elif city and not (st or zp) and _CSZ_RE.match(city):      # "Passaic, NJ 07055-5114" in the City box
+        city, st, zp = split_city_state_zip(city)
     if line and not a1:
         a1, a2b, city2, st2, zp2 = split_address_line(line)
         a2, city, st, zp = a2 or a2b, city or city2, st or st2, zp or zp2
@@ -342,11 +372,22 @@ def fix_vin(raw) -> str:
     return t.replace("I", "1").replace("O", "0").replace("Q", "0")
 
 
+_NARR_PREFIX = re.compile(r"^\s*\(?[A-Za-z]{2}\)\s*")
+_NARR_SUFFIX = re.compile(r"\s*[-\u2013]\s*Field\s*\d+\w*\s*$", re.I)
+
+
+def clean_narrative_value(value) -> str:
+    """'(NY) STATE FARM - Field 25' -> 'STATE FARM'."""
+    t = _NARR_SUFFIX.sub("", _s(value))
+    t = _NARR_PREFIX.sub("", t) if re.match(r"^\s*\([A-Za-z]{2}\)\s*\S", t) else t
+    return text(t)
+
+
 def insurance_carrier(ins_code, narrative_name) -> str:
     """Printed NJ insurance code as seen (000 stays 000). Blank / asterisks -> narrative name,
     else blank."""
     code = text(ins_code)
-    return code if code else text(narrative_name)
+    return code if code else clean_narrative_value(narrative_name)
 
 
 def vehicle_towed(removal: dict | None) -> str:
@@ -379,6 +420,32 @@ def _occupant_party(o: dict, pos: int | None) -> str | None:
     return None
 
 
+def _blank_name() -> dict:
+    return {"first_name": "", "middle_name": "", "last_name": "", "suffix": ""}
+
+
+def _has_name(n: dict) -> bool:
+    return any(n.get(k) for k in ("first_name", "middle_name", "last_name"))
+
+
+def _has_address(a: dict) -> bool:
+    return any(a.get(k) for k in ("address_1", "city", "state", "zip_code"))
+
+
+def _owner_name(ow: dict) -> dict:
+    """Owner name printed as separate boxes OR as one string (company-aware)."""
+    if _s(ow.get("name")):
+        return split_name(ow.get("name"), ow.get("is_company"))
+    return person_from_boxes(ow.get("first"), ow.get("middle"), ow.get("last"), company_check=True)
+
+
+def _damage(v: dict) -> str:
+    """Principal damage: box 130 (V-left) / 132 (V-right) on the new form that shows box 134;
+    131 / 133 on the older one. Values arrive already assigned to the right vehicle."""
+    d = v.get("damage") or {}
+    return impact_location(d.get("new") if d.get("new_form", True) else d.get("old"))
+
+
 def map_nj(raw: dict, *, today: date | None = None) -> dict:
     """Raw NJTR-1 extraction -> keying payload (see module docstring)."""
     today = today or date.today()
@@ -399,38 +466,35 @@ def map_nj(raw: dict, *, today: date | None = None) -> dict:
         "incident_cross_street": text(raw.get("cross_road")),
         "latitude": text(raw.get("latitude")),
         "longitude": text(raw.get("longitude")),
-        "weather": _coded("Weather (box 103)", raw.get("environmental_condition"), weather, notes),
-        "road_condition": _coded("Road condition (box 102)", raw.get("road_surface_condition"), road_condition, notes),
+        "weather": _coded("Weather (box 103)", raw.get("weather_code"), weather, notes),
+        "road_condition": _coded("Road condition (box 102)", raw.get("road_condition_code"), road_condition, notes),
         "speed_limit": text(raw.get("speed_limit")),
         "hit_and_run": "1" if any(v.get("hit_and_run") for v in vehicles) else "",
     }
 
-    boxes = raw.get("damage_boxes") or {}
-    has_134 = raw.get("has_box_134", True)
-    damage = {1: boxes.get("130" if has_134 else "131"), 2: boxes.get("132" if has_134 else "133")}
-    contrib = raw.get("contributing") or {}
-    contrib_by_unit = {1: [contrib.get("118a"), contrib.get("118b")], 2: [contrib.get("119a"), contrib.get("119b")]}
-
-    units, other_parties, used_driver_rows = [], [], set()
+    units, other_parties, used_rows = [], [], set()
     for v in vehicles:
         n = _num(v.get("number")) or (len(units) + 1)
         label = f"Unit {n}"
-        occ = [(i, o) for i, o in enumerate(occupants) if _s(o.get("vehicle")) == str(n)]
+        occ = [(i, o) for i, o in enumerate(occupants) if _num(o.get("vehicle")) == n]
         drv_row = next(((i, o) for i, o in occ if _num(o.get("position")) == 1), None)
         if drv_row:
-            used_driver_rows.add(drv_row[0])
+            used_rows.add(drv_row[0])
         d_occ = drv_row[1] if drv_row else {}
         d, ow, veh = v.get("driver") or {}, v.get("owner") or {}, v.get("vehicle") or {}
 
-        # --- driver (printed names win; PARKED only when nothing is printed)
+        # --- driver: printed boxes win; the occupant row is the fallback; PARKED only when no name anywhere
         dn = person_from_boxes(d.get("first"), d.get("middle"), d.get("last"))
-        printed_driver_name = any(dn[k] for k in ("first_name", "middle_name", "last_name"))
-        if not printed_driver_name and v.get("parked"):
+        if not _has_name(dn) and _s(d_occ.get("name")):
+            dn = split_name(d_occ.get("name"), d_occ.get("company"))
+        printed_driver = _has_name(dn)
+        if not printed_driver and v.get("parked"):
             dn["last_name"] = "PARKED"
+        charges = [text(c) for c in (v.get("charges") or []) if text(c)]
         driver = {
             **dn, **_address(d, f"{label} driver", notes),
             "date_of_birth": norm_date(d.get("dob"), age=_num(d_occ.get("age")), ref_year=crash_year, today=today),
-            "drivers_license": text(d.get("dl_number")),
+            "drivers_license": license_number(d.get("dl_number")),
             "drivers_license_state": text(d.get("dl_state")).upper(),
             "injury_code": _coded(f"{label} injury", d_occ.get("injury"), injury_code, notes),
             "ejection": _coded(f"{label} ejection", d_occ.get("ejection"), ejection, notes),
@@ -438,30 +502,38 @@ def map_nj(raw: dict, *, today: date | None = None) -> dict:
             "safety_used": _coded(f"{label} safety equipment used", d_occ.get("safety_used"), safety_equipment, notes),
             "hospital": hospital_code(d_occ.get("hospital")),
             "alcohol_test": alcohol_test(d.get("alcohol_given")),
-            "charge": [text(c) for c in (v.get("charges") or []) if text(c)],
+            "charge": charges[0] if charges else "",         # first charge goes through the engine
+            "extra_charges": charges[1:],                     # the rest use the form's (+) button
         }
 
-        # --- owner (Same As Driver: copy first/middle/last only; address as printed)
+        # --- owner (Same As Driver: copy first/middle/last only; address always as printed)
         if ow.get("same_as_driver"):
-            on = {"first_name": dn["first_name"] if printed_driver_name else "",
-                  "middle_name": dn["middle_name"] if printed_driver_name else "",
-                  "last_name": dn["last_name"] if printed_driver_name else "", "suffix": dn["suffix"]}
+            on = {"first_name": dn["first_name"], "middle_name": dn["middle_name"],
+                  "last_name": dn["last_name"] if printed_driver else "",
+                  "suffix": dn["suffix"]}
+            if not printed_driver:
+                on["first_name"] = on["middle_name"] = ""
         else:
-            on = person_from_boxes(ow.get("first"), ow.get("middle"), ow.get("last"), company_check=True)
+            on = _owner_name(ow)
         owner = {**on, **_address(ow, f"{label} owner", notes)}
 
+        codes = [o.get("airbag") for _, o in occ]
         vehicle = {
             "vin": fix_vin(veh.get("vin")), "year": text(veh.get("year")),
             "make": text(veh.get("make")), "model": text(veh.get("model")),
             "tag_number": text(veh.get("plate")), "tag_state": text(veh.get("plate_state")).upper(),
             "insurance_carrier": insurance_carrier(v.get("ins_code"), v.get("narrative_insurance")),
-            "policy_number": text(v.get("policy_number")),
+            "policy_number": text(v.get("policy_number")) or clean_narrative_value(v.get("narrative_policy")),
             "vehicle_towed": vehicle_towed(v.get("removal")),
-            "airbag_deployed": airbag([o.get("airbag") for _, o in occ]),
-            "contributing": contributing(contrib_by_unit.get(n, [])),
-            "impact_location": impact_location(damage.get(n)),
+            "airbag_deployed": airbag(codes),
+            "contributing": contributing(v.get("contributing") or []),
+            "impact_location": _damage(v),
         }
-        if vehicle["vin"] and (len(vehicle["vin"]) != 17):
+        for c in codes:
+            k = _num(c)
+            if k is not None and k not in _AIRBAG_KNOWN:
+                notes.append(f"{label}: airbag code '{_s(c)}' is not in the NJ list; ignored")
+        if vehicle["vin"] and len(vehicle["vin"]) != 17:
             notes.append(f"{label}: VIN has {len(vehicle['vin'])} characters; keyed as printed, review")
         units.append({"party_number": n, "owner": owner, "driver": driver, "vehicle": vehicle})
 
@@ -469,42 +541,50 @@ def map_nj(raw: dict, *, today: date | None = None) -> dict:
 
     # --- other parties: passengers, pedestrians, pedalcyclists, unknown
     for i, o in enumerate(occupants):
-        if i in used_driver_rows:
+        if i in used_rows:
             continue
         pos = _num(o.get("position"))
         veh_no = _s(o.get("vehicle")).upper()
+        row = _s(o.get("row")) or str(i + 1)
         party = _occupant_party(o, pos)
         if party is None:
             party = "Unknown"
-            notes.append(f"Occupant {_s(o.get('row') or i + 1)}: seating position missing or a second driver; keyed as Unknown")
+            notes.append(f"Occupant {row}: seating position missing or a second driver; keyed as Unknown")
         name = split_name(o.get("name"), o.get("company"))
-        addr = _address(o["address"] if isinstance(o.get("address"), dict) else o,
-                        f"Occupant {_s(o.get('row') or i + 1)}", notes)
-        unit = by_number.get(_num(veh_no)) if veh_no.isdigit() else None
-        party_row = {
+        addr = _address(o["address"] if isinstance(o.get("address"), dict) else o, f"Occupant {row}", notes)
+        veh_digits = str(int(veh_no)) if veh_no.isdigit() else ""       # "01" -> "1" (form unit numbers)
+        unit = by_number.get(int(veh_digits)) if veh_digits else None
+        # Passenger address: key what is printed; only when none is printed tick Same As Driver
+        # (or Same As Owner when that vehicle has no driver address).
+        same_driver = same_owner = False
+        if unit and not _has_address(addr):
+            if _has_address(unit["driver"]):
+                same_driver = True
+            elif _has_address(unit["owner"]):
+                same_owner = True
+        other_parties.append({
+            "role": party.upper(), "party_number": veh_digits,
             "person_type": party, **name, **addr,
-            "vehicle_number": veh_no if veh_no.isdigit() else "",
-            "date_of_birth": "",
-            "injury_code": _coded("Occupant injury", o.get("injury"), injury_code, notes),
-            "ejection": _coded("Occupant ejection", o.get("ejection"), ejection, notes),
-            "safety_available": _coded("Occupant safety equipment available", o.get("safety_available"), safety_equipment, notes),
-            "safety_used": _coded("Occupant safety equipment used", o.get("safety_used"), safety_equipment, notes),
+            "vehicle_number": veh_digits, "date_of_birth": "",
+            "injury_code": _coded(f"Occupant {row} injury", o.get("injury"), injury_code, notes),
+            "ejection": _coded(f"Occupant {row} ejection", o.get("ejection"), ejection, notes),
+            "safety_available": _coded(f"Occupant {row} safety equipment available", o.get("safety_available"), safety_equipment, notes),
+            "safety_used": _coded(f"Occupant {row} safety equipment used", o.get("safety_used"), safety_equipment, notes),
             "hospital": hospital_code(o.get("hospital")),
-            "same_as_driver_address": bool(unit and _same_address(addr, unit["driver"])),
-            "same_as_owner_address": bool(unit and not _same_address(addr, unit["driver"]) and _same_address(addr, unit["owner"])),
-        }
-        other_parties.append(party_row)
+            "same_as_driver_address": same_driver, "same_as_owner_address": same_owner,
+        })
 
-    # --- property owners (field 135): name + address; description is discarded
+    # --- property owners (field 135): name + address; the description is discarded
     for p in raw.get("property_owners") or []:
         name_text = _s(p.get("name"))
-        name = split_name(name_text, p.get("company")) if name_text else {"first_name": "", "middle_name": "", "last_name": "", "suffix": ""}
+        name = split_name(name_text, p.get("is_company")) if name_text else _blank_name()
         addr = _address(p, "Property owner", notes)
-        if not name_text and not addr["address_1"]:
+        if not _has_name(name) and not _has_address(addr):
             notes.append("Property damage listed with no owner name or address; no Property Owner keyed")
             continue
         other_parties.append({
-            "person_type": "Property Owner", **name, **addr, "vehicle_number": "", "date_of_birth": "",
+            "role": "PROPERTY OWNER", "party_number": "", "person_type": "Property Owner",
+            **name, **addr, "vehicle_number": "", "date_of_birth": "",
             "injury_code": "", "ejection": "", "safety_available": "", "safety_used": "", "hospital": "",
             "same_as_driver_address": False, "same_as_owner_address": False,
         })
