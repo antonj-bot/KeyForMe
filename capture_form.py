@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 # KeyForMe shared-core migration v1
-from app.states import PIPELINES
 
 
 import argparse
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from playwright.sync_api import sync_playwright
 
-from run_browser import KEYING_URL, find_form_page, wait_for_enter
+from run_browser import find_form_page, wait_for_enter
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 MOCK_ROOT = PROJECT_ROOT / "mock"
+# Testing site. Pass --url to capture from another environment.
+DEFAULT_URL = "https://keying-uat.green.usgov-ecrash-prod.azuregov.lnrsg.io/ecrash/"
 
 
 TAB_SHIM = r"""
@@ -41,6 +43,9 @@ document.addEventListener("click", event => {
     }
 
     event.preventDefault();
+
+    anchor.closest("ul").querySelectorAll("li").forEach(item =>
+        item.setAttribute("aria-selected", item.contains(anchor) ? "true" : "false"));
 
     const targetId = href.slice(1);
 
@@ -105,6 +110,15 @@ def make_index_html(form_filename: str) -> str:
     )
 
 
+def state_code(value: str) -> str:
+    code = str(value).strip().upper()
+    if not re.fullmatch(r"[A-Z]{2}", code):
+        raise argparse.ArgumentTypeError(
+            "use a two-letter state code, for example NJ"
+        )
+    return code
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Capture a blank eCrash keying form.",
@@ -113,9 +127,15 @@ def parse_args():
     parser.add_argument(
         "--state",
         required=True,
-        choices=tuple(sorted(PIPELINES)),
-        type=str.upper,
-        help="State form to capture.",
+        type=state_code,
+        help="Two-letter state code to capture (any state, even one "
+             "that has no pipeline yet).",
+    )
+
+    parser.add_argument(
+        "--url",
+        default=DEFAULT_URL,
+        help="eCrash keying site to open (default: UAT).",
     )
 
     return parser.parse_args()
@@ -163,14 +183,14 @@ def main() -> None:
             else context.new_page()
         )
 
-        page.goto(KEYING_URL)
+        page.goto(args.url)
 
         result = wait_for_enter(
             context,
             (
                 f"Open a BLANK {state} form. "
-                "Add at least 2 vehicle units and "
-                "1 Other Party for testing, then press Enter. "
+                "Add at least 2 vehicle units, plus 1 passenger/other "
+                "party if the form has that section, then press Enter. "
                 "Press Q to cancel..."
             ),
         )

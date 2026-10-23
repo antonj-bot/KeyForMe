@@ -4,12 +4,18 @@ from app.core.tabs import ensure_tabs, activate_tab
 from app.browser.controls import fill_field, fill_person, fill_radio
 from app.browser.vin_lookup import fill_vin
 from app.browser.state_forms import get_form_spec
+from app.core.driver_rules import apply_hit_and_run_name
 
 YEAR_MAKE_MODEL=("year","make","model")
 
 def fill_form(page,payload,*,state,log=None):
     spec=get_form_spec(state)
     warnings=[]
+    # General SOP, all states: a hit-and-run vehicle with no driver name gets HIT AND RUN as the last name.
+    payload,hit_and_run_units=apply_hit_and_run_name(payload)
+    if log:
+        for number in hit_and_run_units:
+            log(f"Unit {number}: no driver name on a hit-and-run vehicle; keying HIT AND RUN as the last name")
     units=payload.get("units",[])
     if not units:
         raise ValueError("No vehicle units available to fill.")
