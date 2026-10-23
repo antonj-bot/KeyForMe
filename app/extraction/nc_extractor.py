@@ -4,7 +4,8 @@ The NC report is a scanned image. One DMV-349 "form" is TWO pages: page 1 holds 
 incident, Unit 1 (left) and Unit 2 (right) and the A-H person table; page 2 holds the per-unit
 boxes (59, 60), the diagram footer (Traveling / Parked), the narrative, property damage, witnesses
 and the traffic-violation (charge) lines. A report with more than two units adds a second form
-("Form 2 of 2", Supplemental Report box ticked) with Units 3 and 4, and so on.
+("Form 2 of 2") with Units 3 and 4, and so on. A form whose Supplemental Report box is ticked REPLACES
+the original report: only the supplemental form(s) are keyed (see select_forms).
 
 So pages are read in PAIRS (1+2, 3+4, ...), one model call per pair, in parallel. The result is a
 RAW dict in the shape documented at the top of app/keying/nc_rules.py (map_nc turns it into the
@@ -34,6 +35,7 @@ class NCPerson(BaseModel):
     state: str | None = None
     zip: str | None = None
     phone: str | None = None
+    phone_area: str | None = None                  # the digits inside "H ( 516 )"
     dob: str | None = None
     dl_number: str | None = None
     dl_state: str | None = None
@@ -112,6 +114,7 @@ class NCParty(BaseModel):
     state: str | None = None
     zip: str | None = None
     phone: str | None = None
+    phone_area: str | None = None                  # the digits inside "Phone No. ( 910 )"
 
 
 class NCFormExtraction(BaseModel):
@@ -150,7 +153,9 @@ FORM_PROMPT = (
     "Return one merged result. "
 
     "PAGE 1. Header: the revision printed under DMV-349 (form_rev), 'Form _ of _' (form_number, form_total), "
-    "the Supplemental Report box (supplemental), 'No of Units Involved' (units_involved), and Local Use/Patrol "
+    "the Supplemental Report box in the header row beside 'Form _ of _' (supplemental = true ONLY if that "
+    "box is marked with an X; the 'Non-Reportable' box beside it is a different box), 'No of Units Involved' "
+    "(units_involved), and Local Use/Patrol "
     "Area (local_use, copy it whole, e.g. 260816025HA/02). Return crash_date and crash_time (24-hour clock) from "
     "the Date and Time boxes. 'Crash occurred In/Near ___ Municipality': return the name written there as "
     "municipality (not the County). 'On' road and 'from' road: return the text printed on the On line as on_road "
@@ -164,8 +169,15 @@ FORM_PROMPT = (
     "the D.L. line, and box 37 Alcohol/Drugs Suspected (alcohol_suspected). Owner: First, Middle, Last, Suffix "
     "(a company name goes in last), the 'Same as Driver?' box (same_as_driver) and the 'Same Address as Driver?' "
     "box (same_address_as_driver), then the owner's address, city, state, zip. Vehicle: Plate #, Plate State, VIN, "
-    "Vehicle Make, Vehicle Year, 43 TAD (e.g. FD-2), Insurance Company, Policy #. Owner and driver are different "
+    "Vehicle Make, Vehicle Year, 43 TAD (every code printed in the box, e.g. FD-2 or FC-2,FD-3), Insurance Company, Policy #. Owner and driver are different "
     "people unless the report shows otherwise. Read the VIN character by character. "
+    "ADDRESSES. Return the street line in address_1 exactly as printed. If the street line also holds an "
+    "apartment, unit, suite or lot part (for example '2008 S MEBANE ST, APT,2022B'), return that part, "
+    "exactly as printed, in address_2 and keep only the street in address_1. "
+    "PHONE NUMBERS. The driver's Home phone is printed 'H ( area code ) number'. Return the digits inside "
+    "the parentheses as phone_area and the number after them as phone (for example phone_area '516', phone "
+    "'530-0635'). Never drop the area code. Do the same for the witness and property-owner Phone No. lines. "
+    "Ignore the work phone (W). "
 
     "PERSON TABLE (rows A-H at the bottom of page 1; the column numbers 21 to 32 are printed above it). Return one "
     "occupant per row that has ANY entry: row letter; vehicle = column 21; person_type = column 22; name and "
@@ -218,10 +230,30 @@ def _margin_dict(boxes) -> dict[str, str]:
     return out
 
 
+def _pages(indexes) -> str:
+    return ", ".join(f"{2 * i + 1}-{2 * i + 2}" for i in indexes)
+
+
+def select_forms(forms):
+    """A form whose Supplemental Report box is ticked REPLACES the original report: key only the supplemental
+    form(s) and disregard the original one(s). With no supplemental form, or when every form is supplemental,
+    nothing changes. Returns (forms_to_use, note); note is None when nothing was dropped."""
+    flagged = [i for i, f in enumerate(forms) if f.supplemental]
+    if not flagged or len(flagged) == len(forms):
+        return list(forms), None
+    dropped = [i for i in range(len(forms)) if i not in flagged]
+    note = (f"Supplemental Report box is ticked on pages {_pages(flagged)}: only the supplemental report is keyed; "
+            f"the original report on pages {_pages(dropped)} is disregarded")
+    return [forms[i] for i in flagged], note
+
+
 def merge_forms(forms: list[NCFormExtraction]) -> dict:
     """Combine the per-form results into the raw dict map_nc reads. Form 1 owns the incident; each unit
     and occupant is tagged with its form index so letters A-H and margin boxes 14-19 stay per form."""
     warnings: list[str] = []
+    forms, supplemental_note = select_forms(forms)
+    if supplemental_note:
+        warnings.append(supplemental_note)
     first = forms[0]
     raw: dict = {
         "form_rev": first.form_rev, "local_use": first.local_use, "crash_date": first.crash_date,
@@ -257,6 +289,7 @@ def merge_forms(forms: list[NCFormExtraction]) -> dict:
         raw["witnesses"].extend(w.model_dump() for w in f.witnesses)
         raw["property_owners"].extend(p.model_dump() for p in f.property_owners)
     raw["notes"] = warnings
+    raw["supplemental_only"] = bool(supplemental_note)
     raw["units_involved"] = max((f.units_involved or 0 for f in forms), default=0) or None
     return raw
 
@@ -272,8 +305,11 @@ def check_units(raw: dict) -> None:
         return
     missing = missing_units(set(range(1, int(expected) + 1)), actual)
     if missing:
+        hint = (" Only the supplemental report is keyed (its box is ticked): check that the Supplemental Report "
+                "box was read correctly and that the supplemental form lists every unit."
+                if raw.get("supplemental_only") else "")
         raise IncompleteExtractionError(
-            f"NC report lists {expected} units but unit(s) {sorted(missing)} were not extracted; filling cancelled.")
+            f"NC report lists {expected} units but unit(s) {sorted(missing)} were not extracted; filling cancelled." + hint)
 
 
 def extract_nc(pdf_path: Path, model: str = "gpt-6-luna") -> dict:

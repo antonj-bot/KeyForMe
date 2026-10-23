@@ -241,11 +241,17 @@ def nc_tad_code(raw) -> str:
     return code if code in TAD_TO_IMPACT else ""
 
 
-def nc_impact_location(tad_values) -> str:
-    """One TAD -> its option; several: the same option -> that option, different options -> Multiple."""
-    if isinstance(tad_values, str):
+def nc_tad_tokens(tad_values) -> list[str]:
+    """The TAD box can hold several codes ('FC-2,FD-3'): one token per code."""
+    if tad_values is None or isinstance(tad_values, str):
         tad_values = [tad_values]
-    opts = {TAD_TO_IMPACT[c] for c in (nc_tad_code(v) for v in tad_values or []) if c}
+    return [t for v in tad_values for t in re.split(r"[,;/\s]+", str(v or "")) if t]
+
+
+def nc_impact_location(tad_values) -> str:
+    """One TAD -> its option; several (in one box or as a list): the same option -> that option, different
+    options -> Multiple, so Front + Rear is Multiple."""
+    opts = {TAD_TO_IMPACT[c] for c in (nc_tad_code(t) for t in nc_tad_tokens(tad_values)) if c}
     opts.discard("")
     if not opts:
         return ""
@@ -342,6 +348,69 @@ def nc_text(value) -> str:
 def nc_dob(value) -> str:
     """MM/DD/YYYY only; partial or redacted dates (XX/XX/1985) are blank."""
     return "" if nc_is_redacted(_s(value)) else norm_date(value)
+
+
+
+# ----------------------------------------------------------------- phone numbers
+def nc_phone(number, area=None) -> str:
+    """Home phone as printed, area code first: '516 530-0635'.
+    The report prints 'H ( 516 ) 530-0635'. The extractor returns the part in the parentheses as `area` and the
+    rest as `number`; a complete number in `number` (any common format) is accepted too. Only 7 digits and no
+    area code -> '530-0635'. Anything that is not a plain 7/10-digit phone (an extension...) is kept as printed.
+    Redacted or null -> ''."""
+    n, a = nc_text(number), nc_text(area)
+    if not n:
+        return ""
+    digits = re.sub(r"\D", "", n)
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) == 10:
+        return f"{digits[:3]} {digits[3:6]}-{digits[6:]}"
+    if len(digits) == 7:
+        code = re.sub(r"\D", "", a)
+        if len(code) == 3:
+            return f"{code} {digits[:3]}-{digits[3:]}"
+        return f"{digits[:3]}-{digits[3:]}"
+    return n
+
+
+def _phone(who: str, src: dict, notes: list[str]) -> str:
+    value = nc_phone(src.get("phone"), src.get("phone_area"))
+    if re.fullmatch(r"\d{3}-\d{4}", value):
+        notes.append(f"{who}: phone '{value}' has no area code on the report")
+    return value
+
+
+# ----------------------------------------------------------------- address line 2 (apartment / unit)
+_UNIT_WORDS = r"(?:APT|APARTMENT|UNIT|STE|SUITE|SPC|SPACE|LOT|RM|ROOM|FL|FLOOR|BLDG|BUILDING|TRLR|TRAILER)"
+_UNIT_ID = r"(?:[A-Z]|[A-Z]{0,2}-?\d[A-Z0-9-]*)"       # one letter, or anything holding a digit: B, 4C, 2022B
+_NC_UNIT_RE = re.compile(
+    rf"^(?P<a1>.*?\S)\s*[,\s]\s*(?P<a2>(?:{_UNIT_WORDS}\b\.?[\s,#]*{_UNIT_ID}|#\s*{_UNIT_ID}))\s*$", re.I)
+
+
+def nc_split_unit(address_1) -> tuple[str, str]:
+    """'2008 S MEBANE ST, APT,2022B' -> ('2008 S MEBANE ST', 'APT,2022B'). The unit part is kept exactly as printed.
+    The shared splitter misses 'APT,2022B' (a comma straight after APT). A street that merely contains a unit word
+    ('12 LOT ST', '100 PARK FL') and a state-and-zip tail ('FL 33101') are left alone."""
+    t = _s(address_1)
+    m = _NC_UNIT_RE.match(t)
+    if not m:
+        return t, ""
+    a1, a2 = m.group("a1").rstrip(" ,"), m.group("a2")
+    if not re.search(r"[A-Za-z0-9]", a1) or re.fullmatch(r"(?i)(?:FL|FLOOR)[\s,.#]*\d{5}(?:-\d{4})?", a2):
+        return t, ""
+    return a1, a2
+
+
+def _nc_address(src, who, notes) -> dict:
+    """The shared address helper, then the NC unit rule: apartment / unit text goes in Address 2.
+    An Address 2 that is already filled is never touched."""
+    a = _address(src, who, notes)
+    if a["address_1"] and not a["address_2"]:
+        a1, a2 = nc_split_unit(a["address_1"])
+        if a2:
+            a["address_1"], a["address_2"] = a1, a2
+    return a
 
 
 # ----------------------------------------------------------------- names / charges
@@ -501,7 +570,7 @@ def map_nc(raw: dict, *, today: date | None = None) -> dict:
             other_parties.append({
                 # party_number stays blank: the shared engine keys it into Vehicle #, and a pedestrian has none
                 "role": ptype.upper(), "party_number": "", "person_type": ptype, **dn,
-                **_address(d, f"{label} pedestrian", notes), "vehicle_number": "",
+                **_nc_address(d, f"{label} pedestrian", notes), "vehicle_number": "",
                 "date_of_birth": nc_dob(d.get("dob")),
                 "drivers_license": license_number(d.get("dl_number")),
                 "drivers_license_state": text(d.get("dl_state")).upper(),
@@ -520,8 +589,8 @@ def map_nc(raw: dict, *, today: date | None = None) -> dict:
 
         ch = charges_for(_full_name(dn)) if printed_driver else []
         driver = {
-            **dn, **_address(d, f"{label} driver", notes),
-            "phone": nc_text(d.get("phone")),
+            **dn, **_nc_address(d, f"{label} driver", notes),
+            "phone": _phone(f"{label} driver", d, notes),
             "date_of_birth": nc_dob(d.get("dob")),
             "drivers_license": license_number(d.get("dl_number")),
             "drivers_license_state": text(d.get("dl_state")).upper(),
@@ -552,8 +621,8 @@ def map_nc(raw: dict, *, today: date | None = None) -> dict:
                 on["first_name"] = on["middle_name"] = ""
         else:
             on = printed_owner
-        oaddr = _address(ow, f"{label} owner", notes)
-        daddr = _address(d, f"{label} driver", notes)
+        oaddr = _nc_address(ow, f"{label} owner", notes)
+        daddr = _nc_address(d, f"{label} driver", notes)
         same_addr = bool(ow.get("same_address_as_driver")) and not _has_address(oaddr) and _has_address(daddr)
         owner = {**on, **oaddr, "same_as_driver_address": same_addr}
 
@@ -575,7 +644,7 @@ def map_nc(raw: dict, *, today: date | None = None) -> dict:
         }
         if vehicle["vin"] and len(vehicle["vin"]) != 17:
             notes.append(f"{label}: VIN has {len(vehicle['vin'])} characters; keyed as printed, review")
-        if not blank_like(veh.get("tad")) and not nc_tad_code(veh.get("tad")):
+        if not blank_like(veh.get("tad")) and not any(nc_tad_code(t) for t in nc_tad_tokens(veh.get("tad"))):
             notes.append(f"{label}: TAD '{_s(veh.get('tad'))}' is not in the impact matrix; Impact Location left blank")
         units.append({"party_number": n, "hit_and_run": engine_hit_and_run, "parked": parked,
                       "owner": owner, "driver": driver, "vehicle": vehicle})
@@ -595,7 +664,7 @@ def map_nc(raw: dict, *, today: date | None = None) -> dict:
         if ptype is None:
             ptype = "Unknown"
             notes.append(f"Row {r['_letter']}: person type '{_s(r.get('person_type'))}' missing; keyed as Unknown")
-        addr = _address(r, f"Row {r['_letter']}", notes)
+        addr = _nc_address(r, f"Row {r['_letter']}", notes)
         unit = by_number.get(r["_veh"]) if r["_veh"] else None
         same_driver = same_owner = False
         if unit and not _has_address(addr):
@@ -630,7 +699,7 @@ def map_nc(raw: dict, *, today: date | None = None) -> dict:
         if route == "other_unknown":
             nm = split_name(c.get("name"))
             other_parties.append({
-                "role": "UNKNOWN", "party_number": "", "person_type": "Unknown", **nm, **_address({}, "", []),
+                "role": "UNKNOWN", "party_number": "", "person_type": "Unknown", **nm, **_nc_address({}, "", []),
                 "vehicle_number": "", "date_of_birth": "", "drivers_license": "", "drivers_license_state": "",
                 "injury_code": "", "alcohol_drugs": "", "protection": "", "ejection": "",
                 "nonmotorist_actions": "", "ems_to": "", "charge": text(c.get("charge")), "extra_charges": [],
@@ -648,13 +717,13 @@ def map_nc(raw: dict, *, today: date | None = None) -> dict:
         for p in raw.get(key) or []:
             nm_text = _s(p.get("name"))
             name = split_name(nm_text, p.get("is_company")) if nm_text else _blank_name()
-            addr = _address(p, label, notes)
+            addr = _nc_address(p, label, notes)
             if not _has_name(name) and not _has_address(addr):
                 notes.append(f"{label} listed with no name or address; not keyed")
                 continue
             other_parties.append({
                 "role": role, "party_number": "", "person_type": label, **name, **addr,
-                "phone": nc_text(p.get("phone")), "vehicle_number": "", "date_of_birth": "",
+                "phone": _phone(label, p, notes), "vehicle_number": "", "date_of_birth": "",
                 "drivers_license": "", "drivers_license_state": "", "injury_code": "", "alcohol_drugs": "",
                 "protection": "", "ejection": "", "nonmotorist_actions": "", "ems_to": "",
                 "charge": "", "extra_charges": [],

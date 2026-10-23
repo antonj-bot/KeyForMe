@@ -77,7 +77,7 @@ def test_two_forms_keep_letters_and_margin_boxes_apart():
                         "protection": "1", "airbag": "1", "ejection": "1"}]
     r2["margin_boxes"] = {"14": "20"}
     r2["charges"], r2["witnesses"], r2["property_owners"] = [], [], []
-    f2 = as_form(r2, supplemental=True, form_number=2, form_total=2, units_involved=4, witnesses=[], property_owners=[])
+    f2 = as_form(r2, supplemental=False, form_number=2, form_total=2, units_involved=4, witnesses=[], property_owners=[])
     raw = ex.merge_forms([as_form(r1, units_involved=4), f2])
     ex.check_units(raw)
     p = nc.map_nc(raw, today=TODAY)
