@@ -8,3 +8,5 @@ pymupdf==2.0
 python-dotenv==1.2.4
 starlette==1.9.0
 uvicorn==0.54.0
+keyboard==0.13.5
+pywin32==310
