@@ -1,3 +1,4 @@
+﻿import sys
 """Offline tests using synthetic values and fake controls; no API or browser."""
 import json
 import unittest
@@ -92,14 +93,18 @@ class CoreTests(unittest.TestCase):
         section=Section(); section.hrefs.append(section.hrefs[0])
         with self.assertRaises(RuntimeError): validate_tabs(section,2)
     def test_disabled_plugin(self):
-        with patch("app.state_plugins.PLUGINS",{"XX":SimpleNamespace(ENABLED=False)}):
+        with patch.dict(sys.modules, {"app.state_plugins": SimpleNamespace(PLUGINS={"XX": SimpleNamespace(ENABLED=False)})}):
             self.assertEqual(extend_pipelines({"CA":object()}).keys(),{"CA"})
     def test_enabled_plugin(self):
         adapter=SimpleNamespace(ENABLED=True,extract=lambda p,m:{},fill=lambda p,d:None)
-        with patch("app.state_plugins.PLUGINS",{"XX":adapter}):
+        with patch.dict(sys.modules, {"app.state_plugins": SimpleNamespace(PLUGINS={"XX": adapter})}):
             self.assertIs(extend_pipelines({})["XX"],adapter)
     def test_duplicate_plugin(self):
-        with patch("app.state_plugins.PLUGINS",{"CA":SimpleNamespace(ENABLED=False)}):
+        with patch.dict(sys.modules, {"app.state_plugins": SimpleNamespace(PLUGINS={"CA": SimpleNamespace(ENABLED=False)})}):
             with self.assertRaises(ValueError): extend_pipelines({"CA":object()})
 
 if __name__ == "__main__": unittest.main()
+
+
+
+
