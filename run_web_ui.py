@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import os
 import socket
+import sys
 import threading
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from queue import Empty
-from tempfile import TemporaryDirectory
 from playwright.sync_api import Error as PlaywrightError
 import uvicorn
 from playwright.sync_api import sync_playwright
@@ -86,6 +87,108 @@ def timed_step(label: str):
         ui.log(f"{label}: {elapsed:.2f}s")
 
 
+# ---------------- downloads ----------------
+# KeyForMe's own PDF download (for extraction) stays temporary. A download the
+# user starts by hand is saved to the normal Windows Downloads folder.
+_automated_downloads = 0
+
+
+@contextmanager
+def automated_download_guard():
+    global _automated_downloads
+    _automated_downloads += 1
+    try:
+        yield
+    finally:
+        _automated_downloads -= 1
+
+
+@contextmanager
+def automated_pdf_download(context, selector):
+    """Temporary PDF for extraction; downloads started inside it are not kept."""
+    with ExitStack() as stack:
+        with automated_download_guard():
+            pdf_path = stack.enter_context(
+                download_report_pdf_temporarily(context, selector)
+            )
+        yield pdf_path
+
+
+def downloads_dir() -> Path:
+    """The user's real Downloads folder (honors Windows folder redirection)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class GUID(ctypes.Structure):
+                _fields_ = [
+                    ("Data1", wintypes.DWORD),
+                    ("Data2", wintypes.WORD),
+                    ("Data3", wintypes.WORD),
+                    ("Data4", ctypes.c_ubyte * 8),
+                ]
+
+            folder_id = GUID(
+                0x374DE290, 0x123F, 0x4565,
+                (ctypes.c_ubyte * 8)(0x91, 0x64, 0x39, 0xC4, 0x92, 0x5E, 0x46, 0x7D),
+            )
+            raw = ctypes.c_wchar_p()
+            result = ctypes.windll.shell32.SHGetKnownFolderPath(
+                ctypes.byref(folder_id), 0, None, ctypes.byref(raw)
+            )
+            if result == 0 and raw.value:
+                path = Path(raw.value)
+                ctypes.windll.ole32.CoTaskMemFree(raw)
+                return path
+        except Exception:
+            pass
+    return Path.home() / "Downloads"
+
+
+def unique_path(folder: Path, filename: str) -> Path:
+    """Chrome-style collision handling: name.pdf, name (1).pdf, name (2).pdf."""
+    name = Path(filename).name or "download"
+    target = folder / name
+    stem, suffix, counter = target.stem, target.suffix, 1
+    while target.exists():
+        target = folder / f"{stem} ({counter}){suffix}"
+        counter += 1
+    return target
+
+
+def save_manual_download(download) -> None:
+    if _automated_downloads:
+        return  # KeyForMe's own temporary PDF download
+    try:
+        folder = downloads_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        download.save_as(str(unique_path(folder, download.suggested_filename)))
+        # Remove Playwright's temporary copy right away.
+        try:
+            download.delete()
+        except Exception:
+            pass
+        ui.log("Download saved to your Downloads folder", "success")
+    except Exception as error:
+        ui.log(f"Could not save the download ({type(error).__name__})", "warning")
+
+
+def watch_manual_downloads(context) -> None:
+    """Attach the manual-download handler to every current and future page."""
+    seen = set()
+
+    def attach(page) -> None:
+        if id(page) in seen:
+            return
+        seen.add(id(page))
+        page.on("download", save_manual_download)
+
+    context.on("page", attach)
+    for page in context.pages:
+        attach(page)
+
+
 def process_one(context, model: str):
     from app.states import PIPELINES
     from app.states.detect import detect_state
@@ -116,7 +219,7 @@ def process_one(context, model: str):
 
         download_start = time.perf_counter()
 
-        with download_report_pdf_temporarily(
+        with automated_pdf_download(
             context,
             DOWNLOAD_SELECTOR,
         ) as pdf_path:
@@ -309,18 +412,23 @@ def main():
     print(f"KeyForMe control panel: {url}")
     print("Close Chrome or press Ctrl+C to stop.")
     try:
-        with sync_playwright() as playwright, TemporaryDirectory(
-            prefix="KeyForMe_Chrome_", ignore_cleanup_errors=True
-        ) as profile:
+        profile_dir = settings.data_dir() / "ChromeProfile"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        ui.log("Using the dedicated persistent KeyForMe Chrome profile")
+        with sync_playwright() as playwright:
             context = playwright.chromium.launch_persistent_context(
-                user_data_dir=profile,
+                user_data_dir=str(profile_dir),
                 channel="chrome",
                 headless=False,
                 chromium_sandbox=True,
                 accept_downloads=True,
                 no_viewport=True,
                 env=os.environ.copy(),
+                # Playwright adds --disable-extensions by default; remove it so
+                # extensions installed in this profile load and persist.
+                ignore_default_args=["--disable-extensions"],
             )
+            watch_manual_downloads(context)
             dashboard = context.pages[0] if context.pages else context.new_page()
             dashboard.goto(KEYING_URL, wait_until="domcontentloaded")
             control = context.new_page()
