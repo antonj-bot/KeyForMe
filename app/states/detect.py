@@ -18,6 +18,8 @@ FORM_SIGNATURES = [
     ("CA", "CHP 555", ("CHP 555", "CALIFORNIA HIGHWAY PATROL")),
     ("NJ", "NJTR-1", ("NEW JERSEY POLICE CRASH INVESTIGATION REPORT", "NJTR-1")),
     ("TX", "CR-3", ("TEXAS PEACE OFFICER", "CR-3 ")),
+    # NC prints only "DMV-349 (Rev. 1/2009)": no state name anywhere in the header.
+    ("NC", "DMV-349", ("DMV-349", "DMV 349", "DMV349")),
 ]
 
 STATE_NAMES = {
@@ -35,6 +37,21 @@ STATE_NAMES = {
     "VERMONT": "VT", "VIRGINIA": "VA", "WASHINGTON": "WA", "WEST VIRGINIA": "WV",
     "WISCONSIN": "WI", "WYOMING": "WY",
 }
+
+
+def _squash(value: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+
+
+def state_from_form_name(form_name: str | None) -> str | None:
+    """Form number printed in the header -> state, for reports that never print a state name (NC DMV-349)."""
+    squashed = _squash(form_name)
+    if not squashed:
+        return None
+    for state, _form, phrases in FORM_SIGNATURES:
+        if any(_squash(p) and _squash(p) in squashed for p in phrases):
+            return state
+    return None
 
 
 def detect_from_text(page) -> ReportID | None:
@@ -63,7 +80,7 @@ def detect_from_image(page, model: str) -> ReportID:
         pix.tobytes("jpeg", jpg_quality=85)
     ).decode()
 
-    return get_ai_client().parse(
+    found = get_ai_client().parse(
         model=model,
         instructions=(
             "This is the top of a police crash report. Read the printed "
@@ -77,6 +94,9 @@ def detect_from_image(page, model: str) -> ReportID:
         schema=ReportID,
         reasoning_effort="none",
     )
+    if found.state is None:                       # header prints a form number but no state (NC)
+        found.state = state_from_form_name(found.form_name)
+    return found
 
 
 def detect_state(pdf_path, model: str) -> ReportID:

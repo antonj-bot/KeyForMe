@@ -5,4 +5,6 @@ Example:
 CA/NM remain registered in app/states/__init__.py.
 Only adapters with ENABLED = True are added.
 """
-PLUGINS = {}
+from app.states import nc
+
+PLUGINS = {"NC": nc}
