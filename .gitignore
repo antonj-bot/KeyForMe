@@ -27,3 +27,5 @@ KeyForMe_shared_state_foundation/
 app_backup/
 ToFix.txt
 KeyForMe.spec
+.rid-backups/
+.dialog-backups/

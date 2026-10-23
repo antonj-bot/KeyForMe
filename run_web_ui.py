@@ -19,11 +19,13 @@ from playwright.sync_api import sync_playwright
 
 
 from app.browser.pdf_downloader import download_report_pdf_temporarily
+from app.browser.dialogs import automation_running, watch_dialogs
 from app.ui import server as ui
 from app import desktop_settings as settings
+from app.rid_export import RidExportController
 import time
 
-KEYING_URL = "https://azkeying.ecrash.lexisnexisrisk.com/ecrash/"
+KEYING_URL = "https://keying-uat.green.usgov-ecrash-prod.azuregov.lnrsg.io/ecrash/"
 DOWNLOAD_SELECTOR = "#download"
 
 
@@ -411,6 +413,7 @@ def main():
     ui.log("Application ready. Open an eCrash work item in Chrome.")
     print(f"KeyForMe control panel: {url}")
     print("Close Chrome or press Ctrl+C to stop.")
+    rid_export = None
     try:
         profile_dir = settings.data_dir() / "ChromeProfile"
         profile_dir.mkdir(parents=True, exist_ok=True)
@@ -429,6 +432,13 @@ def main():
                 ignore_default_args=["--disable-extensions"],
             )
             watch_manual_downloads(context)
+            watch_dialogs(context, log=ui.log)
+            rid_export = RidExportController(
+                context,
+                log=ui.log,
+                skip_page=lambda page: page.url.startswith(url),
+            )
+            rid_export.start()
             dashboard = context.pages[0] if context.pages else context.new_page()
             dashboard.goto(KEYING_URL, wait_until="domcontentloaded")
             control = context.new_page()
@@ -447,7 +457,8 @@ def main():
                         break
 
                     try:
-                        live[0].wait_for_timeout(200)
+                        rid_export.tick()
+                        live[0].wait_for_timeout(30)
                     except PlaywrightError:
                         # A page can close between the check and the wait.
                         remaining = [
@@ -468,6 +479,7 @@ def main():
                     continue
                 if command == "settings":
                     try:
+                        rid_export.close()
                         settings.show_settings()
                         # Restart ensures extractors with cached clients cannot
                         # keep using an old key after replacement or deletion.
@@ -490,7 +502,8 @@ def main():
                     ui.update(busy=False, key_configured=False, status="API key required")
                     continue
                 try:
-                    process_one(context, model)
+                    with automation_running():
+                        process_one(context, model)
                 except Exception as error:
                     # Do not put exception strings in the UI: they may contain
                     # internal URLs or report information.
@@ -513,6 +526,8 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        if rid_export is not None:
+            rid_export.close()
         server.should_exit = True
 
 
