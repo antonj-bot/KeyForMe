@@ -23,7 +23,7 @@ from app.ui import server as ui
 from app import desktop_settings as settings
 import time
 
-KEYING_URL = "https://azkeying.ecrash.lexisnexisrisk.com/ecrash/"
+KEYING_URL = "https://keying-uat.green.usgov-ecrash-prod.azuregov.lnrsg.io/ecrash/"
 DOWNLOAD_SELECTOR = "#download"
 
 
