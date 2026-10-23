@@ -140,6 +140,101 @@ def test_dash_only_names_stay_blank_through_the_whole_mapper():
     assert (prop["first_name"], prop["last_name"]) == ("", "") and prop["address_1"] == "8 PINE ST"
 
 
+# ------------------------------------------------------------ HIT AND RUN driver (General SOP, all states)
+def hr_raw(**driver):
+    raw = make_raw()
+    raw["vehicles"][1]["driver"] = fx.driver(**driver) if driver else fx.driver()      # unit 2 is the Hit & Run unit
+    return raw
+
+
+def test_hit_and_run_vehicle_with_no_driver_name_keys_hit_and_run_in_last_name():
+    out = nj.map_nj(hr_raw(), today=TODAY)
+    d = out["units"][1]["driver"]
+    assert (d["first_name"], d["middle_name"], d["last_name"]) == ("", "", "HIT AND RUN")
+    assert out["units"][1]["hit_and_run"] is True and out["incident"]["hit_and_run"] == "1"
+
+
+def test_hit_and_run_with_a_printed_name_keeps_the_name():
+    d = nj.map_nj(hr_raw(first="BEN", last="POE"), today=TODAY)["units"][1]["driver"]
+    assert (d["first_name"], d["last_name"]) == ("BEN", "POE")
+    d = nj.map_nj(hr_raw(last="POE"), today=TODAY)["units"][1]["driver"]
+    assert (d["first_name"], d["last_name"]) == ("", "POE")                                  # any one name is a name
+
+
+def test_hit_and_run_with_unknown_printed_keeps_unknown():
+    d = nj.map_nj(hr_raw(last="UNKNOWN"), today=TODAY)["units"][1]["driver"]
+    assert d["last_name"] == "UNKNOWN"                                                       # KWYS
+
+
+def test_hit_and_run_with_dash_only_names_counts_as_no_details():
+    d = nj.map_nj(hr_raw(first="-", middle="-", last="-"), today=TODAY)["units"][1]["driver"]
+    assert (d["first_name"], d["middle_name"], d["last_name"]) == ("", "", "HIT AND RUN")
+
+
+def test_hit_and_run_name_comes_from_the_occupant_row_when_the_driver_boxes_are_empty():
+    raw = hr_raw()
+    raw["occupants"][3]["name"] = "DOE, JOHN"                                                # row D = unit 2's driver
+    d = nj.map_nj(raw, today=TODAY)["units"][1]["driver"]
+    assert (d["first_name"], d["last_name"]) == ("JOHN", "DOE")
+
+
+def test_a_vehicle_that_is_not_hit_and_run_never_gets_the_placeholder():
+    raw = hr_raw()
+    raw["vehicles"][1]["hit_and_run"] = False
+    out = nj.map_nj(raw, today=TODAY)
+    assert out["units"][1]["driver"]["last_name"] == "" and out["units"][1]["hit_and_run"] is False
+    assert out["units"][0]["hit_and_run"] is False and out["incident"]["hit_and_run"] == ""
+
+
+def test_parked_and_hit_and_run_together_with_no_name_leaves_the_last_name_blank():
+    from app.core.driver_rules import apply_hit_and_run_name
+    raw = hr_raw()
+    raw["vehicles"][1]["parked"] = True
+    out = nj.map_nj(raw, today=TODAY)
+    assert out["units"][1]["driver"]["last_name"] == ""                                       # not PARKED, not HIT AND RUN
+    assert out["units"][1]["hit_and_run"] is False                                            # so the shared engine rule stays off
+    assert out["incident"]["hit_and_run"] == "1"                                              # the incident checkbox is still ticked
+    assert any("both Parked and Hit & Run" in n and "left blank" in n for n in out["notes"])
+    result, changed = apply_hit_and_run_name(out)                                             # what the engine does with this payload
+    assert changed == [] and result["units"][1]["driver"]["last_name"] == ""
+
+
+def test_parked_and_hit_and_run_with_a_printed_name_keys_the_name():
+    raw = hr_raw(first="BEN", last="POE")
+    raw["vehicles"][1]["parked"] = True
+    out = nj.map_nj(raw, today=TODAY)
+    assert out["units"][1]["driver"]["last_name"] == "POE"
+    assert not any("both Parked and Hit & Run" in n for n in out["notes"])
+
+
+def test_parked_only_and_hit_and_run_only_are_unchanged_by_the_conflict_rule():
+    raw = hr_raw()
+    raw["vehicles"][1]["hit_and_run"] = False
+    raw["vehicles"][1]["parked"] = True
+    assert nj.map_nj(raw, today=TODAY)["units"][1]["driver"]["last_name"] == "PARKED"
+    raw["vehicles"][1].update(hit_and_run=True, parked=False)
+    out = nj.map_nj(raw, today=TODAY)
+    assert out["units"][1]["driver"]["last_name"] == "HIT AND RUN" and out["units"][1]["hit_and_run"] is True
+
+
+def test_owner_same_as_driver_never_copies_the_hit_and_run_placeholder():
+    raw = hr_raw()
+    raw["vehicles"][1]["owner"] = fx.owner("BEN POE", same=True, a1="2 ELM ST")
+    o = nj.map_nj(raw, today=TODAY)["units"][1]["owner"]
+    assert (o["first_name"], o["last_name"]) == ("", "") and o["address_1"] == "2 ELM ST"
+
+
+def test_hit_and_run_driver_keeps_the_other_driver_details_as_printed():
+    d = nj.map_nj(hr_raw(alcohol="No", dl="NONE"), today=TODAY)["units"][1]["driver"]
+    assert d["last_name"] == "HIT AND RUN" and d["alcohol_test"] == "No" and d["drivers_license"] == "NONE"
+
+
+def test_the_violation_sample_keeps_its_printed_driver_on_a_hit_and_run_unit():
+    o = run("VIOLATION")
+    d = o["units"][0]["driver"]
+    assert o["units"][0]["hit_and_run"] is True and (d["first_name"], d["last_name"]) == ("Jonathan", "Rosado")
+
+
 def test_unknown_contributing_code_is_keyed_with_a_review_note():
     raw = make_raw()
     raw["vehicles"][0]["contributing"] = ["04", "26"]

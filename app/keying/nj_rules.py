@@ -50,6 +50,8 @@ from __future__ import annotations
 import re
 from datetime import date
 
+from app.core.driver_rules import HIT_AND_RUN_NAME
+
 # ----------------------------------------------------------------- text helpers
 _NULL = {
     "", "-", "--", "---", "*", "**", "***", "****", "N/A", "NA", "N A", "NONE",
@@ -502,13 +504,23 @@ def map_nj(raw: dict, *, today: date | None = None) -> dict:
         d_occ = drv_row[1] if drv_row else {}
         d, ow, veh = v.get("driver") or {}, v.get("owner") or {}, v.get("vehicle") or {}
 
-        # --- driver: printed boxes win; the occupant row is the fallback; PARKED only when no name anywhere
+        # --- driver: printed boxes win; the occupant row is the fallback; HIT AND RUN / PARKED only when no name anywhere
         dn = person_from_boxes(d.get("first"), d.get("middle"), d.get("last"))
         if not _has_name(dn) and _s(d_occ.get("name")):
             dn = split_name(d_occ.get("name"), d_occ.get("company"))
         printed_driver = _has_name(dn)
-        if not printed_driver and v.get("parked"):
-            dn["last_name"] = "PARKED"
+        engine_hit_and_run = bool(v.get("hit_and_run"))      # the flag the shared engine reads
+        if not printed_driver:
+            if v.get("hit_and_run") and v.get("parked"):
+                # Both boxes marked and no driver name: it is unclear which placeholder applies, so the
+                # last name is left blank (and the engine is told NOT to key HIT AND RUN) for the keyer.
+                engine_hit_and_run = False
+                notes.append(f"{label}: marked both Parked and Hit & Run with no driver name; "
+                             "driver last name left blank, key it by hand")
+            elif v.get("hit_and_run"):                     # General SOP, all states
+                dn["last_name"] = HIT_AND_RUN_NAME
+            elif v.get("parked"):
+                dn["last_name"] = "PARKED"
         charges = [text(c) for c in (v.get("charges") or []) if text(c)]
         driver = {
             **dn, **_address(d, f"{label} driver", notes),
@@ -557,7 +569,8 @@ def map_nj(raw: dict, *, today: date | None = None) -> dict:
                 notes.append(f"{label}: airbag code '{_s(c)}' is not in the NJ list; ignored")
         if vehicle["vin"] and len(vehicle["vin"]) != 17:
             notes.append(f"{label}: VIN has {len(vehicle['vin'])} characters; keyed as printed, review")
-        units.append({"party_number": n, "owner": owner, "driver": driver, "vehicle": vehicle})
+        units.append({"party_number": n, "hit_and_run": engine_hit_and_run,
+                      "owner": owner, "driver": driver, "vehicle": vehicle})
 
     by_number = {u["party_number"]: u for u in units}
 

@@ -1,8 +1,18 @@
 """Browser tests against the captured NJ keying form (mock/nj/index.html) in real Chrome.
 
 Run:  python -m pytest tests/test_nj_form.py -q
-Set KEYFORME_TEST_CHROMIUM to a browser executable to avoid channel="chrome".
+Browser: these tests use Playwright's OWN Chromium by default (install it once with
+`python -m playwright install chromium`). On the dev machine, key presses in the installed Chrome
+(channel="chrome") randomly stalled for seconds (see tools/diagnose_impact_location.py output), which
+made these tests slow and flaky, while Playwright's Chromium was consistently fast. The app itself is
+still checked in real Chrome on UAT. To run the tests in your installed Chrome anyway:
+    $env:KEYFORME_TEST_BROWSER = "chrome"
+To use any other browser executable:  $env:KEYFORME_TEST_CHROMIUM = "C:\\path\\to\\browser.exe"
 Skipped automatically when mock/nj/ or a browser is missing.
+
+Speed: the captured form holds 15 unit tabs and 10 other-party tabs (about 1300 fields), far more than a real
+report. Every test page is trimmed to 4 + 4 tabs (about 400 fields, like a real 4-vehicle report) and every
+Playwright call has a 10 s default timeout, so a stuck step fails in seconds, not minutes.
 
 The mock is a static capture: the site's own scripts are removed, so the (+) charge button
 does nothing there. The tests add a tiny script that imitates it (clone the Charge row).
@@ -11,7 +21,9 @@ That checks our CLICK-AND-WAIT logic; the site's real (+) behaviour must be conf
 import functools
 import http.server
 import os
+import re
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -37,35 +49,75 @@ PLUS_SHIM = """() => { document.addEventListener('click', e => {
 }, true); }"""
 
 
+# Keep only the first `units` unit tabs and `others` other-party tabs (removes the extra panels from the DOM).
+TRIM_JS = """(cfg) => {
+  const trim = (id, keep) => {
+    const s = document.getElementById(id); if (!s) return 0;
+    const anchors = Array.from(s.querySelectorAll('ul.ui-tabs-nav > li > a.ui-tabs-anchor'));
+    anchors.slice(keep).forEach(a => {
+      const pid = a.getAttribute('href').slice(1);
+      const panel = Array.from(s.querySelectorAll('[role="tabpanel"]')).find(p => p.id === pid);
+      if (panel) panel.remove();
+      a.closest('li').remove();
+    });
+    return anchors.length;
+  };
+  return [trim('section-page-base-owner-02', cfg.units), trim('section-page-base-passenger-03', cfg.others)];
+}"""
+KEEP_UNITS, KEEP_OTHERS = 4, 4
+
+
+class QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *args):          # no request lines in the test output
+        pass
+
+
+def launch_test_browser(playwright):
+    """KEYFORME_TEST_CHROMIUM=<exe> wins; KEYFORME_TEST_BROWSER=chrome uses the installed Chrome;
+    otherwise Playwright's own Chromium."""
+    exe = os.environ.get("KEYFORME_TEST_CHROMIUM")
+    if exe:
+        return playwright.chromium.launch(executable_path=exe)
+    if os.environ.get("KEYFORME_TEST_BROWSER", "").strip().lower() == "chrome":
+        return playwright.chromium.launch(channel="chrome")
+    return playwright.chromium.launch()
+
+
 @pytest.fixture(scope="module")
 def browser():
     if not (MOCK / "index.html").exists():
         pytest.skip("mock/nj/index.html not found")
     sync_api = pytest.importorskip("playwright.sync_api")
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(MOCK))
-    handler.log_message = lambda *a: None
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(QuietHandler, directory=str(MOCK)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     with sync_api.sync_playwright() as p:
-        exe = os.environ.get("KEYFORME_TEST_CHROMIUM")
         try:
-            b = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch(channel="chrome")
+            b = launch_test_browser(p)
         except Exception as error:
-            pytest.skip(f"no browser available ({type(error).__name__})")
+            pytest.skip(f"no browser available ({type(error).__name__}); run: python -m playwright install chromium")
         yield b, f"http://127.0.0.1:{server.server_address[1]}/index.html"
         b.close()
     server.shutdown()
+    server.server_close()
+
+
+def open_page(browser, plus=True):
+    b, url = browser
+    pg = b.new_page()
+    pg.set_default_timeout(10_000)                       # no step may hide for 30 s
+    pg.goto(url)
+    pg.wait_for_timeout(300)
+    inner = pg.frames[1]
+    inner.evaluate(TRIM_JS, {"units": KEEP_UNITS, "others": KEEP_OTHERS})
+    inner.evaluate(TAB_FIX)
+    if plus:
+        inner.evaluate(PLUS_SHIM)
+    return pg
 
 
 @pytest.fixture
 def page(browser):
-    b, url = browser
-    pg = b.new_page()
-    pg.goto(url)
-    pg.wait_for_timeout(300)
-    inner = pg.frames[1]
-    inner.evaluate(TAB_FIX)
-    inner.evaluate(PLUS_SHIM)
+    pg = open_page(browser)
     yield pg
     pg.close()
 
@@ -103,9 +155,16 @@ def test_other_party_panel_selectors(page):
         assert panel.locator(selector).count() == 1, key
 
 
-def test_tabs_exist_for_a_four_unit_report_and_nine_other_parties(page):
-    assert frame(page).locator(m.UNIT_SECTION).locator(m.TAB_ANCHORS).count() >= 4
-    assert frame(page).locator(m.OTHER_SECTION).locator(m.TAB_ANCHORS).count() >= 9
+def test_the_capture_has_enough_tabs_for_a_four_unit_report_and_nine_other_parties():
+    html = (MOCK / "nj_form.html").read_text(encoding="utf-8")
+    owner, other = html.split('id="section-page-base-passenger-03"', 1)
+    assert len(re.findall(r'class="ui-tabs-anchor"', owner)) >= 4
+    assert len(re.findall(r'class="ui-tabs-anchor"', other)) >= 9
+
+
+def test_the_test_page_is_trimmed_to_a_realistic_size(page):
+    assert frame(page).locator(m.UNIT_SECTION).locator(m.TAB_ANCHORS).count() == KEEP_UNITS
+    assert frame(page).locator(m.OTHER_SECTION).locator(m.TAB_ANCHORS).count() == KEEP_OTHERS
 
 
 # ------------------------------------------------------------------ Hit & Run
@@ -151,11 +210,7 @@ def test_missing_plus_button_warns_and_leaves_the_rest(page):
 
 
 def test_plus_button_that_adds_nothing_warns(browser):
-    b, url = browser
-    bare = b.new_page()                                    # no (+) script at all: the click changes nothing
-    bare.goto(url)
-    bare.wait_for_timeout(300)
-    bare.frames[1].evaluate(TAB_FIX)
+    bare = open_page(browser, plus=False)                  # no (+) script at all: the click changes nothing
     try:
         warnings = extras.add_extra_charges(bare, {"units": [{"party_number": 1, "driver": {"extra_charges": ["A"]}}]})
         assert len(warnings) == 1 and "Unit 1" in warnings[0]
@@ -164,8 +219,10 @@ def test_plus_button_that_adds_nothing_warns(browser):
 
 
 def test_unit_tab_that_does_not_exist_warns(page):
-    warnings = extras.add_extra_charges(page, {"units": [{"party_number": 99, "driver": {"extra_charges": ["A"]}}] * 20})
-    assert warnings and all("by hand" in w for w in warnings)
+    units = [{"party_number": n, "driver": {"extra_charges": []}} for n in range(1, KEEP_UNITS + 1)]
+    units.append({"party_number": KEEP_UNITS + 1, "driver": {"extra_charges": ["A"]}})          # no 5th tab exists
+    warnings = extras.add_extra_charges(page, {"units": units})
+    assert len(warnings) == 1 and f"Unit {KEEP_UNITS + 1}" in warnings[0] and "by hand" in warnings[0]
 
 
 # ------------------------------------------------------------------ Same As address boxes
@@ -343,8 +400,10 @@ def test_units_without_an_impact_location_are_skipped(page):
 
 def test_a_missing_unit_tab_is_a_warning_not_an_exception(page):
     install_suggest(page)
-    warnings = extras.fix_impact_locations(page, {"units": [{"party_number": 99, "vehicle": {"impact_location": "Rear"}}] * 20})
-    assert warnings and all("check it by hand" in w for w in warnings)
+    units = [{"party_number": n, "vehicle": {"impact_location": ""}} for n in range(1, KEEP_UNITS + 1)]
+    units.append({"party_number": KEEP_UNITS + 1, "vehicle": {"impact_location": "Rear"}})      # no 5th tab exists
+    warnings = extras.fix_impact_locations(page, {"units": units})
+    assert len(warnings) == 1 and f"Unit {KEEP_UNITS + 1}" in warnings[0] and "check it by hand" in warnings[0]
 
 
 def test_fill_nj_extras_runs_the_impact_check_first(page):
@@ -354,3 +413,90 @@ def test_fill_nj_extras_runs_the_impact_check_first(page):
                                                             "vehicle": {"impact_location": "Rear"}}]}
     assert extras.fill_nj_extras(page, payload) == []
     assert impact(page, 1) == "Rear"
+
+
+# ------------------------------------------------------------------ a slow or stuck page costs seconds, never minutes
+def disable_impact_field(pg, number=1):
+    open_tab(pg, m.UNIT_SECTION, number)
+    pg.frames[1].evaluate("document.querySelector(\"[id^='Vehicle_DamagedAreas-t%d']\").disabled = true" % number)
+
+
+def test_a_stuck_field_gives_a_warning_within_seconds(page, monkeypatch):
+    install_suggest(page)
+    monkeypatch.setattr(extras, "STEP_TIMEOUT_MS", 600)
+    monkeypatch.setattr(extras, "BLANK_TIMEOUT_MS", 400)
+    disable_impact_field(page)                              # clicks and typing now wait for an enabled field
+    started = time.monotonic()
+    warnings = extras.fix_impact_locations(page, units("Rear"))
+    assert time.monotonic() - started < 8
+    assert len(warnings) == 1 and "Unit 1" in warnings[0] and "by hand" in warnings[0]
+
+
+def test_the_time_budget_stops_a_field_and_leaves_it_blank(page):
+    install_suggest(page)
+    field = engine_style_fill(page, 1, "Rear")
+    assert field.input_value() == "Front & Rear"
+    started = time.monotonic()
+    assert extras.select_exact_option(page, field, "Rear", budget_s=0.001) is False
+    assert time.monotonic() - started < 5
+    assert impact(page, 1) == ""                            # blank beats wrong
+
+
+def test_total_budget_skips_the_remaining_units_with_a_warning(page, monkeypatch):
+    install_suggest(page)
+    monkeypatch.setattr(extras, "TOTAL_BUDGET_S", -1)       # already used up
+    warnings = extras.fix_impact_locations(page, units("Rear", "Front"))
+    assert len(warnings) == 2 and all("time budget used up" in w and "by hand" in w for w in warnings)
+
+
+def test_a_slow_check_is_mentioned_in_the_log(page, monkeypatch):
+    install_suggest(page)
+    monkeypatch.setattr(extras, "SLOW_LOG_S", 0.0)          # anything counts as slow
+    engine_style_fill(page, 1, "Rear")
+    logs = []
+    assert extras.fix_impact_locations(page, units("Rear"), logs.append) == []
+    assert any("was slow" in line and "responding slowly" in line for line in logs)
+    assert not any("Rear" in line and "was slow" in line for line in logs)              # the report value is never logged
+
+
+def test_every_playwright_step_in_select_exact_option_has_a_timeout():
+    """Guards against the 30 s default sneaking back in: each page/field call in the function names a timeout."""
+    import inspect
+    source = inspect.getsource(extras.select_exact_option) + inspect.getsource(extras._type_text) + inspect.getsource(extras._blank)
+    calls = re.findall(r"\.(input_value|click|fill|press|press_sequentially|type)\(([^)]*)\)", source)
+    assert calls and all("timeout" in args for _, args in calls), [c for c in calls if "timeout" not in c[1]]
+
+
+# ------------------------------------------------------------------ which browser the tests use
+class _FakeChromium:
+    def __init__(self):
+        self.calls = []
+
+    def launch(self, **kwargs):
+        self.calls.append(kwargs)
+        return kwargs
+
+
+class _FakePlaywright:
+    def __init__(self):
+        self.chromium = _FakeChromium()
+
+
+def test_browser_choice_defaults_to_playwrights_own_chromium(monkeypatch):
+    for name in ("KEYFORME_TEST_CHROMIUM", "KEYFORME_TEST_BROWSER"):
+        monkeypatch.delenv(name, raising=False)
+    fake = _FakePlaywright()
+    launch_test_browser(fake)
+    assert fake.chromium.calls == [{}]                                   # no channel, no path: the bundled build
+
+
+def test_browser_choice_can_use_installed_chrome_or_a_given_executable(monkeypatch):
+    monkeypatch.delenv("KEYFORME_TEST_CHROMIUM", raising=False)
+    monkeypatch.setenv("KEYFORME_TEST_BROWSER", " Chrome ")
+    fake = _FakePlaywright()
+    launch_test_browser(fake)
+    assert fake.chromium.calls == [{"channel": "chrome"}]
+    monkeypatch.setenv("KEYFORME_TEST_CHROMIUM", "X:\\b.exe")
+    fake = _FakePlaywright()
+    launch_test_browser(fake)
+    assert fake.chromium.calls == [{"executable_path": "X:\\b.exe"}]            # an explicit path beats everything
