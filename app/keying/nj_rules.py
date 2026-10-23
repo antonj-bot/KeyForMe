@@ -84,10 +84,19 @@ def license_number(value) -> str:
     return t
 
 
+_PLACEHOLDER_TOKEN = re.compile(r"[-\u2010-\u2015_*.,]+")      # "-", "--", an en/em dash, "*", "_", "." or ","
+
+
+def _drop_dashes(value) -> str:
+    """Remove tokens made only of dashes / asterisks / dots / commas. Hyphens inside a name
+    (BERMEO-ALTAMIRANO) and company symbols such as "&" are untouched."""
+    return " ".join(tok for tok in _s(value).split() if not _PLACEHOLDER_TOKEN.fullmatch(tok))
+
+
 def name_part(value) -> str:
-    """Name field: key what you see, including UNKNOWN/UNK; only bare punctuation is dropped."""
-    t = _s(value)
-    return t if re.search(r"[A-Za-z0-9]", t) else ""
+    """Name field: key what you see, including UNKNOWN/UNK. A box holding only "-" is blank,
+    and a stray "-" next to a real name is dropped ("JOHN -" -> "JOHN")."""
+    return _drop_dashes(value)
 
 
 # ----------------------------------------------------------------- numeric coded fields
@@ -127,19 +136,29 @@ def hospital_code(raw) -> str:
     return n.group() if n else ""
 
 
-# Apparent Contributing Circumstances (overlay page 2). The form's list shows the
-# code WITHOUT a leading zero ("1 Unsafe Speed"), so codes are keyed as 1, 2, ... 60.
+# Apparent Contributing Circumstances (overlay page 2): KWYS. The printed digits are keyed
+# exactly as printed ("04" stays "04"); only blanks and dashes are dropped. A code that is not in
+# the list below is still keyed, with a review note from the mapper.
 _CONTRIB = (set(range(1, 22)) | {25, 29} | set(range(31, 41)) | {49}
             | set(range(51, 62)) | {69} | set(range(71, 79)) | {85, 89})
 
 
+def contributing_codes(codes) -> list[str]:
+    """Printed codes in order, de-duplicated by value ("04" and "4" are the same code)."""
+    out, seen = [], set()
+    for raw in codes or []:
+        m = re.search(r"\d+", _s(raw))
+        if not m or blank_like(raw):
+            continue
+        key = int(m.group())
+        if key not in seen:
+            seen.add(key)
+            out.append(m.group())
+    return out
+
+
 def contributing(codes) -> str:
-    out = []
-    for raw in codes:
-        n = _num(raw)
-        if n in _CONTRIB and str(n) not in out:
-            out.append(str(n))
-    return ";".join(out)          # multi-select separator: confirm on the live form
+    return ";".join(contributing_codes(codes))          # multi-select separator: confirm on the live form
 
 
 # Airbag deployment (box 94): 1-4 and 7-8 YES; 5 and 6 NO; 99 NA (blank). Any other code is blank.
@@ -243,9 +262,9 @@ def _strip_suffix(tokens: list[str]) -> tuple[list[str], str]:
 def split_name(full, company: bool | None = None) -> dict:
     """One printed name string -> first / middle / last / suffix.
     Companies go entirely into the last name (General SOP). 'LAST, FIRST M' is reordered."""
-    t = _s(full).strip(" ,")
+    t = _drop_dashes(full).strip(" ,")
     blank = {"first_name": "", "middle_name": "", "last_name": "", "suffix": ""}
-    if not t or not re.search(r"[A-Za-z0-9]", t):
+    if not t:
         return blank
     if company is None:
         company = is_company(t)
@@ -529,6 +548,9 @@ def map_nj(raw: dict, *, today: date | None = None) -> dict:
             "contributing": contributing(v.get("contributing") or []),
             "impact_location": _damage(v),
         }
+        for c in contributing_codes(v.get("contributing") or []):
+            if int(c) not in _CONTRIB:
+                notes.append(f"{label}: contributing circumstance '{c}' is not in the NJ list; keyed as printed, review")
         for c in codes:
             k = _num(c)
             if k is not None and k not in _AIRBAG_KNOWN:

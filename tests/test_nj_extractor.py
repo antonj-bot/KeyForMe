@@ -139,6 +139,22 @@ def test_pdf_without_embedded_images_uses_exact_pixel_digest(tmp_path):
     assert kept == [0] and 1 in dropped
 
 
+# ------------------------------------------------------------------ classification wording / crop
+def test_classifier_treats_the_occupant_table_page_as_narrative():
+    prompt = ex.CLASSIFY_PROMPT.upper()
+    assert "OCCUPANTS" in prompt and "83 TO 95" in prompt and "ROW LETTERS" in prompt
+    assert "WHEN UNSURE BETWEEN NARRATIVE AND OTHER, ANSWER NARRATIVE" in prompt
+
+
+def test_header_crop_is_tall_enough_to_include_the_occupant_rows(tmp_path):
+    import base64
+    path = build_pdf(tmp_path, [("unit", "U")])
+    with pymupdf.open(path) as doc:
+        header = Image.open(io.BytesIO(base64.b64decode(ex._header_image(doc, 0).split(",", 1)[1])))
+        full = doc.load_page(0).get_pixmap(dpi=160)
+    assert 0.33 <= header.height / full.height <= 0.37
+
+
 # ------------------------------------------------------------------ extraction flow
 def standard_plan():
     left = vehicle(1, ins_code="000", policy_number="P1", charges=["39:4-88B A"], damage_new="09", contributing_codes=["60", "-"],

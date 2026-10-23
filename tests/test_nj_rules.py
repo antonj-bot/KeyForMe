@@ -28,13 +28,17 @@ def test_numeric_coded_fields(fn, raw, expected):
     assert fn(raw) == expected
 
 
-def test_contributing_circumstances_are_keyed_without_leading_zero():
-    assert nj.contributing(["01", "-"]) == "1"
-    assert nj.contributing(["07", "60"]) == "7;60"
-    assert nj.contributing(["25", "-"]) == "25"                 # 25 = None
-    assert nj.contributing(["01", "1"]) == "1"                  # no duplicates
-    assert nj.contributing(["00", "99", "26"]) == ""            # not in the NJ list
-    assert nj.contributing([None, ""]) == ""
+def test_contributing_circumstances_are_keyed_what_you_see():
+    assert nj.contributing(["04", "-"]) == "04"                  # 04 stays 04
+    assert nj.contributing(["01", "-"]) == "01"
+    assert nj.contributing(["07", "60"]) == "07;60"
+    assert nj.contributing(["4", "-"]) == "4"                    # printed without a zero: keyed without a zero
+    assert nj.contributing(["25", "-"]) == "25"                  # 25 = None
+    assert nj.contributing(["04", "4"]) == "04"                  # the same code twice is keyed once (first printed form)
+    assert nj.contributing(["14", "04"]) == "14;04"
+    assert nj.contributing(["00", "26"]) == "00;26"              # not in the NJ list: still keyed as printed
+    assert nj.contributing([None, "", "-", "--", "***"]) == ""
+    assert nj.contributing(None) == ""
 
 
 @pytest.mark.parametrize("codes,expected", [
@@ -97,6 +101,52 @@ def test_split_name_variants():
     assert nj.split_name("") == {"first_name": "", "middle_name": "", "last_name": "", "suffix": ""}
     assert nj.split_name(None)["last_name"] == ""
     assert nj.split_name("UNKNOWN")["last_name"] == "UNKNOWN"                 # KWYS
+
+
+def test_a_dash_in_a_name_is_never_keyed():
+    blank = {"first_name": "", "middle_name": "", "last_name": "", "suffix": ""}
+    assert nj.split_name("-") == blank and nj.split_name("--") == blank and nj.split_name("- -") == blank
+    assert nj.split_name("JULIA - HARRISON") == {"first_name": "JULIA", "middle_name": "", "last_name": "HARRISON", "suffix": ""}
+    assert nj.split_name("SMITH, -")["last_name"] == "SMITH" and nj.split_name("SMITH, -")["first_name"] == ""
+    assert nj.split_name("JOHN - E - DOE")["middle_name"] == "E"
+    assert nj.split_name("BERMEO-ALTAMIRANO")["last_name"] == "BERMEO-ALTAMIRANO"       # hyphens inside names stay
+    assert nj.split_name("Mary-Ann Smith-Jones")["first_name"] == "Mary-Ann"
+    assert nj.split_name("JULIA \u2013 HARRISON")["middle_name"] == "" and nj.split_name("\u2014") == blank   # en / em dash
+    assert nj.split_name("SMITH & SONS")["last_name"] == "SMITH & SONS"                  # "&" in a company name stays
+    assert nj.split_name("Jersey Central Power & Light")["last_name"] == "Jersey Central Power & Light"
+    assert nj.person_from_boxes("-", "-", "-") == blank
+    assert nj.person_from_boxes("JOHN", "-", "SMITH -") == {"first_name": "JOHN", "middle_name": "", "last_name": "SMITH", "suffix": ""}
+    assert nj.person_from_boxes("JOHN -", "", "DOE")["first_name"] == "JOHN"
+    assert nj.person_from_boxes("", "", "UNKNOWN")["last_name"] == "UNKNOWN"            # UNKNOWN is still KWYS in names
+
+
+def test_dash_only_names_stay_blank_through_the_whole_mapper():
+    raw = make_raw()
+    raw["vehicles"][0]["driver"].update(first="-", middle="-", last="-")
+    raw["vehicles"][1]["owner"] = fx.owner("-", a1="2 ELM ST")
+    raw["occupants"][1]["name"] = "JAY - STAPLETON"
+    raw["occupants"][2]["name"] = "-"
+    raw["property_owners"] = [dict(name="-", address_line="8 PINE ST TRENTON NJ 08601")]
+    out = nj.map_nj(raw, today=TODAY)
+    d = out["units"][0]["driver"]
+    assert (d["first_name"], d["middle_name"], d["last_name"]) == ("", "", "")
+    o = out["units"][1]["owner"]
+    assert (o["first_name"], o["middle_name"], o["last_name"]) == ("", "", "") and o["address_1"] == "2 ELM ST"
+    jay = next(p for p in out["other_parties"] if p["last_name"] == "STAPLETON")
+    assert (jay["first_name"], jay["middle_name"]) == ("JAY", "")
+    for p in out["other_parties"]:
+        assert "-" not in (p["first_name"], p["middle_name"], p["last_name"], p["suffix"])
+    prop = [p for p in out["other_parties"] if p["person_type"] == "Property Owner"][0]
+    assert (prop["first_name"], prop["last_name"]) == ("", "") and prop["address_1"] == "8 PINE ST"
+
+
+def test_unknown_contributing_code_is_keyed_with_a_review_note():
+    raw = make_raw()
+    raw["vehicles"][0]["contributing"] = ["04", "26"]
+    out = nj.map_nj(raw, today=TODAY)
+    assert out["units"][0]["vehicle"]["contributing"] == "04;26"
+    assert any("contributing circumstance '26'" in n for n in out["notes"])
+    assert not any("contributing circumstance '04'" in n for n in out["notes"])
 
 
 def test_company_names_go_to_last_name():
@@ -462,13 +512,13 @@ def test_three_units_report():
     assert u1["owner"]["address_2"] == "APT 2B"
     assert u1["vehicle"]["insurance_carrier"] == "RentalCover.com"            # code was "*": narrative value
     assert u1["vehicle"]["impact_location"] == "Front" and u2["vehicle"]["impact_location"] == "Left Rear"
-    assert u1["vehicle"]["contributing"] == "14;4"
+    assert u1["vehicle"]["contributing"] == "14;04"
     assert (u2["owner"]["first_name"], u2["owner"]["last_name"]) == ("MAYRA", "BERMEO-ALTAMIRANO")  # Same As Driver
     assert u2["driver"]["drivers_license_state"] == "NJ"
     # unit 3 is on the second unit page and is parked with owner details only
     assert u3["driver"]["last_name"] == "PARKED" and u3["driver"]["drivers_license"] == "NONE" and u3["vehicle"]["vehicle_towed"] == "NO"
     assert u3["owner"]["last_name"] == "PALOMEQUEPACHECO" and u3["owner"]["first_name"] == "JAIME" and u3["owner"]["middle_name"] == "G"
-    assert u3["vehicle"]["impact_location"] == "Right Front" and u3["vehicle"]["contributing"] == "25;1"
+    assert u3["vehicle"]["impact_location"] == "Right Front" and u3["vehicle"]["contributing"] == "25;01"
     ems = next(p for p in o["other_parties"] if p["last_name"] == "EMANUEL")
     assert (ems["first_name"], ems["middle_name"], ems["person_type"], ems["party_number"]) == ("JABARI", "SHAHKIR", "Passenger", "1")
     assert (ems["address_1"], ems["address_2"], ems["city"], ems["state"], ems["zip_code"]) == \

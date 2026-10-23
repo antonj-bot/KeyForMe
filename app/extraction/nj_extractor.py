@@ -43,13 +43,18 @@ KEY_WHAT_YOU_SEE = (
 )
 
 CLASSIFY_PROMPT = (
-    "This is the top of one page of a New Jersey police report PDF. Return exactly one kind. "
-    "UNIT = a 'New Jersey Police Crash Investigation Report' form page with the vehicle "
-    "blocks (printed 'Veh. #' boxes, driver, owner and vehicle sections). "
-    "NARRATIVE = a page that has the '145. Crash Description/Narrative' box, or a "
-    "'Motor Vehicle Crash Description' continuation page of narrative text. "
-    "OTHER = anything else: blank separator pages, diagram-only pages, cover sheets, "
-    "photographs, attachments. Use the printed titles only."
+    "This is the top part of one page of a New Jersey police crash report PDF. Return exactly "
+    "one kind. "
+    "UNIT = a page of the 'New Jersey Police Crash Investigation Report' form that shows the "
+    "vehicle blocks (printed 'Veh. #' boxes with driver, owner and vehicle sections). "
+    "NARRATIVE = a page whose top shows the OCCUPANTS table continuation (a grid with column "
+    "numbers 83 to 95, row letters such as E, F, G, H, I, J and a 'Names & Addresses of "
+    "Occupants' column), or a narrative / 'Crash Description' page. Such a page may also hold a "
+    "crash diagram: if the occupants table is shown, answer NARRATIVE. "
+    "OTHER = only blank separator pages, pages that show nothing but a crash diagram (titled "
+    "'Motor Vehicle Crash Diagram'), photographs, cover sheets and attachments. "
+    "When unsure between NARRATIVE and OTHER, answer NARRATIVE: reading one extra page costs "
+    "little, while skipping a page loses occupant, citation or insurance data."
 )
 
 INVENTORY_PROMPT = (
@@ -135,6 +140,7 @@ RECOVERY_SUFFIX = (
     "omit it and say why in warnings. Never create a vehicle to satisfy this request."
 )
 
+HEADER_CROP = 0.35          # share of the page height the classifier sees (rows E-J of the occupant table are inside it)
 _TEXT_UNIT = ("23. VEH", "24. POLICY NO", "53 VEH")
 _TEXT_NARRATIVE = ("CRASH DESCRIPTION", "145. CRASH")
 
@@ -162,7 +168,7 @@ def _page_image(doc, index: int, dpi: int = 200) -> str:
 
 def _header_image(doc, index: int) -> str:
     page = doc.load_page(index)
-    clip = pymupdf.Rect(0, 0, page.rect.width, page.rect.height * 0.25)
+    clip = pymupdf.Rect(0, 0, page.rect.width, page.rect.height * HEADER_CROP)
     return _jpeg(page.get_pixmap(dpi=160, clip=clip, colorspace=pymupdf.csGRAY, alpha=False))
 
 

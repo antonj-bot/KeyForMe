@@ -216,3 +216,141 @@ def test_fill_nj_extras_runs_everything_and_never_raises(page):
     assert extras.fill_nj_extras(page, payload) == []
     assert frame(page).locator(m.HIT_AND_RUN).is_checked() and charge_values(page, 1)[-1] == "B"
     assert extras.fill_nj_extras(page, {}) == []                                       # empty payload is fine
+
+
+# ------------------------------------------------------------------ Impact Location: exact option
+OPTIONS = ["Front", "Front & Rear", "Left Front", "Left Rear", "Left Side", "Multiple", "NA",
+           "Rear", "Right Front", "Right Rear", "Right Side"]
+
+# A stand-in suggestion list: shows options that CONTAIN the typed text, Tab takes the FIRST one
+# (the behaviour that turns "Rear" into "Front & Rear"), ArrowDown fills the box like jQuery UI.
+FAKE_SUGGEST = """(cfg) => {
+  const OPTIONS = cfg.options, ODD = cfg.mode === 'odd';
+  const menu = document.createElement(ODD ? 'div' : 'ul');
+  menu.className = ODD ? 'zzz-list' : 'ui-autocomplete ui-front ui-menu';
+  menu.style.cssText = 'display:none;position:absolute;z-index:99;background:#fff;border:1px solid #888';
+  document.body.appendChild(menu);
+  let active = -1, shown = [], input = null;
+  window.__events = 0;
+  const close = () => { menu.style.display = 'none'; shown = []; active = -1; };
+  const render = () => {
+    menu.innerHTML = '';
+    shown.forEach((text, i) => {
+      const item = document.createElement(ODD ? 'span' : 'li');
+      if (!ODD) item.className = 'ui-menu-item';
+      item.textContent = text; if (ODD) item.style.display = 'block';
+      item.addEventListener('click', () => { input.value = shown[i]; close(); });
+      menu.appendChild(item);
+    });
+    menu.style.display = shown.length ? 'block' : 'none';
+  };
+  document.querySelectorAll("[id^='Vehicle_DamagedAreas-']").forEach(el => {
+    el.addEventListener('input', () => {
+      window.__events++; input = el; const v = el.value.toUpperCase();
+      shown = v ? OPTIONS.filter(o => o.toUpperCase().includes(v)) : []; active = -1; render();
+      const r = el.getBoundingClientRect(); menu.style.left = r.left + 'px'; menu.style.top = (r.bottom + window.scrollY) + 'px';
+    });
+    el.addEventListener('keydown', e => {
+      input = el;
+      if (e.key === 'ArrowDown' && shown.length) { e.preventDefault(); active = Math.min(active + 1, shown.length - 1); el.value = shown[active]; }
+      else if (e.key === 'Tab' && shown.length) { el.value = shown[active >= 0 ? active : 0]; close(); }
+      else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); close(); }
+    });
+  });
+}"""
+
+
+def install_suggest(page, mode="standard", options=OPTIONS):
+    page.frames[1].evaluate(FAKE_SUGGEST, {"options": options, "mode": mode})
+
+
+def engine_style_fill(page, unit, text):
+    """What the shared engine does: type the text, press Tab."""
+    field = open_tab(page, m.UNIT_SECTION, unit).locator(m.VEHICLE["impact_location"]).first
+    field.click()
+    field.press_sequentially(text, delay=20)
+    field.press("Tab")
+    page.wait_for_timeout(150)
+    return field
+
+
+def impact(page, unit):
+    return open_tab(page, m.UNIT_SECTION, unit).locator(m.VEHICLE["impact_location"]).first.input_value()
+
+
+def units(*locations):
+    return {"units": [{"party_number": i, "vehicle": {"impact_location": loc}} for i, loc in enumerate(locations, 1)]}
+
+
+def test_the_bug_typing_rear_and_tab_picks_the_wrong_suggestion(page):
+    install_suggest(page)
+    assert engine_style_fill(page, 1, "Rear").input_value() == "Front & Rear"      # why 06 came out wrong
+
+
+def test_rear_is_corrected_after_the_engine_picked_the_wrong_suggestion(page):
+    install_suggest(page)
+    engine_style_fill(page, 1, "Rear")
+    logs = []
+    assert extras.fix_impact_locations(page, units("Rear"), logs.append) == []
+    assert impact(page, 1) == "Rear" and logs == ["Unit 1: Impact Location set to Rear"]
+
+
+def test_front_and_other_ambiguous_values_are_exact(page):
+    install_suggest(page)
+    for unit, text in ((1, "Front"), (2, "Rear"), (3, "Left Rear")):
+        engine_style_fill(page, unit, text)
+    assert extras.fix_impact_locations(page, units("Front", "Rear", "Left Rear")) == []
+    assert [impact(page, n) for n in (1, 2, 3)] == ["Front", "Rear", "Left Rear"]
+
+
+def test_a_value_that_is_already_exact_is_not_touched(page):
+    install_suggest(page)
+    engine_style_fill(page, 1, "Left Rear")
+    page.frames[1].evaluate("window.__events = 0")
+    logs = []
+    assert extras.fix_impact_locations(page, units("Left Rear"), logs.append) == []
+    assert page.frames[1].evaluate("window.__events") == 0 and logs == []          # no typing, no log line
+
+
+def test_case_and_spacing_differences_count_as_exact(page):
+    install_suggest(page)
+    open_tab(page, m.UNIT_SECTION, 1).locator(m.VEHICLE["impact_location"]).first.fill("  REAR ")
+    assert extras.fix_impact_locations(page, units("Rear")) == []
+    assert impact(page, 1) == "  REAR "
+
+
+def test_menu_without_known_markup_is_handled_with_the_arrow_keys(page):
+    install_suggest(page, mode="odd")
+    engine_style_fill(page, 1, "Rear")
+    assert extras.fix_impact_locations(page, units("Rear")) == []
+    assert impact(page, 1) == "Rear"
+
+
+def test_when_the_exact_option_does_not_exist_the_field_is_blanked_and_a_warning_given(page):
+    install_suggest(page, options=[o for o in OPTIONS if o != "Rear"])
+    engine_style_fill(page, 1, "Rear")
+    assert impact(page, 1) != ""                                                      # engine left a wrong value
+    warnings = extras.fix_impact_locations(page, units("Rear"))
+    assert len(warnings) == 1 and "Unit 1" in warnings[0] and "left blank" in warnings[0]
+    assert impact(page, 1) == ""
+
+
+def test_units_without_an_impact_location_are_skipped(page):
+    install_suggest(page)
+    assert extras.fix_impact_locations(page, units("", "Rear")) == []
+    assert impact(page, 1) == "" and impact(page, 2) == "Rear"
+
+
+def test_a_missing_unit_tab_is_a_warning_not_an_exception(page):
+    install_suggest(page)
+    warnings = extras.fix_impact_locations(page, {"units": [{"party_number": 99, "vehicle": {"impact_location": "Rear"}}] * 20})
+    assert warnings and all("check it by hand" in w for w in warnings)
+
+
+def test_fill_nj_extras_runs_the_impact_check_first(page):
+    install_suggest(page)
+    engine_style_fill(page, 1, "Rear")
+    payload = {"incident": {"hit_and_run": ""}, "units": [{"party_number": 1, "driver": {"extra_charges": []},
+                                                            "vehicle": {"impact_location": "Rear"}}]}
+    assert extras.fill_nj_extras(page, payload) == []
+    assert impact(page, 1) == "Rear"
