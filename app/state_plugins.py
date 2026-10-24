@@ -6,5 +6,6 @@ CA/NM remain registered in app/states/__init__.py.
 Only adapters with ENABLED = True are added.
 """
 from app.states import nc
+from app.states import pa
 
-PLUGINS = {"NC": nc}
+PLUGINS = {"NC": nc, "PA": pa}

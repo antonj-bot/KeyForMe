@@ -4,6 +4,7 @@ from app.browser import field_mapping as ca
 from app.browser import nm_field_mapping as nm
 from app.browser import nj_field_mapping as nj
 from app.browser import nc_field_mapping as nc
+from app.browser import pa_field_mapping as pa
 from app.core.tabs import TabSpec
 
 CA = FormSpec(
@@ -46,7 +47,16 @@ NC = FormSpec(
     person_types=nc.PERSON_TYPES,
 )
 
-FORMS = {"CA": CA, "NM": NM, "NJ": NJ, "NC": NC}
+PA = FormSpec(
+    state="PA", frame=pa.FRAME, unit_section=pa.UNIT_SECTION,
+    incident=pa.INCIDENT, owner=pa.OWNER, driver=pa.DRIVER, vehicle=pa.VEHICLE,
+    tabs=TabSpec(anchors=pa.TAB_ANCHORS, settle_ms=300),
+    radio_fields=pa.RADIO_FIELDS, radios_before_vin=True, units_before_incident=True,
+    other_section=pa.OTHER_SECTION, other=pa.OTHER, other_keys=pa.OTHER_KEYS,
+    person_types=pa.PERSON_TYPES,
+)
+
+FORMS = {"CA": CA, "NM": NM, "NJ": NJ, "NC": NC, "PA": PA}
 
 def get_form_spec(state):
     code = str(state or "").strip().upper()
