@@ -143,7 +143,7 @@ def test_map_unit1_driver_vehicle():
     assert d["extra_charges"] == ["HIT AND RUN/ NO OPERATOR'S LICENSE FAILURE TO"]
     assert v["vehicle_towed"] == "YES" and v["airbag_deployed"] == "YES"
     assert v["impact_location"] == "Front" and v["vehicle_defects"] == "0" and v["speed_limit"] == "35"
-    assert v["tag_number"] == "XXA169" and v["tag_state"] == "SC" and v["vin"] == "1GNSCJE0XDR157820"
+    assert v["tag_number"] == "XXA169" and v["tag_state"] == "SC" and v["vin"] == "1F9TEST08KT000001"
 
 
 def test_owner_spelled_differently_is_kept_as_printed():
@@ -165,10 +165,10 @@ def test_other_parties_witness_and_property_owner():
     ops = nc.map_nc(sample_raw(), today=TODAY)["other_parties"]
     assert sorted(o["role"] for o in ops) == ["PROPERTY OWNER", "WITNESS"]
     w = next(o for o in ops if o["role"] == "WITNESS")
-    assert (w["first_name"], w["middle_name"], w["last_name"]) == ("TARA", "NICOLE", "THOMAS")
-    assert w["address_1"] == "110 ALEO 9TH AVE" and w["zip_code"] == "28379"
+    assert (w["first_name"], w["middle_name"], w["last_name"]) == ("TESTFOUR", "MIDDLED", "SAMPLEFOUR")
+    assert w["address_1"] == "400 SAMPLE 9TH AVE" and w["zip_code"] == "28379"
     po = next(o for o in ops if o["role"] == "PROPERTY OWNER")
-    assert (po["first_name"], po["last_name"]) == ("STEVE", "WATKINS")
+    assert (po["first_name"], po["last_name"]) == ("TESTFIVE", "SAMPLEFIVE")
 
 
 # ------------------------------------------------------------------ rules the sample does not exercise

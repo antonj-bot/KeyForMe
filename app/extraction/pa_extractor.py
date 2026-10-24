@@ -24,6 +24,7 @@ import pymupdf
 from pydantic import BaseModel, Field
 
 from app.core.completeness import IncompleteExtractionError, missing_units
+from app.extraction.prompts import key_what_you_see
 
 MAX_PAGES = 40
 
@@ -166,13 +167,7 @@ class PAPage(BaseModel):
 
 
 # ------------------------------------------------------------------ prompt
-KEY_WHAT_YOU_SEE = (
-    "KEY WHAT YOU SEE. Transcribe every value exactly as printed, including misspellings, punctuation, "
-    "capitalization, leading zeros, identifiers and VIN characters. Never correct, normalize, translate, guess or "
-    "invent. Return null for a blank or unreadable value. Never copy a value from one unit to another. "
-    "For every coded or dropdown-like box return each printed value as {code, text}: the number as printed in "
-    "code and the words as printed in text (either may be null); several printed values are several entries."
-)
+KEY_WHAT_YOU_SEE = key_what_you_see("PA")
 
 PAGE_PROMPT = (
     "This is ONE page of a Commonwealth of Pennsylvania Police Crash Report (the AA-500 family of forms, "

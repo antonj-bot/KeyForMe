@@ -273,7 +273,7 @@ def test_unit_one_payload():
     assert d["violations"] == [{"kind": "primary", "text": "75 3361 SPEED", "charged": "YES"},
                                {"kind": "violation", "text": "75 3714 CARELESS", "charged": "WARNING"}]
     v = u["vehicle"]
-    assert v["vin"] == "1HGCM56715A042022" and v["tag_state"] == "PA" and v["year"] == "2005"
+    assert v["vin"] == "1F9TEST03KT000018" and v["tag_state"] == "PA" and v["year"] == "2005"
     assert v["vehicle_towed"] == "YES" and v["impact_location"] == "Front" and v["vehicle_defects"] == "01"
     assert v["airbag_deployed"] == "YES"                     # driver Front + passenger Not Deployed -> YES
     assert u["trailers"] == [{"tag_number": "TRL1234", "tag_state": "PA", "vin": "", "year": "", "make": "UTILITY"}]

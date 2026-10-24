@@ -21,6 +21,7 @@ import pymupdf
 from pydantic import BaseModel, Field
 
 from app.core.completeness import IncompleteExtractionError, missing_units
+from app.extraction.prompts import key_what_you_see
 
 
 # ------------------------------------------------------------------ schema (all values as printed)
@@ -141,12 +142,7 @@ class NCFormExtraction(BaseModel):
 
 
 # ------------------------------------------------------------------ prompts
-KEY_WHAT_YOU_SEE = (
-    "KEY WHAT YOU SEE. Transcribe every value exactly as printed, including misspellings, punctuation, "
-    "capitalization, leading zeros, identifiers, VIN characters and the literal word null or a series of X. "
-    "Never correct, normalize, translate, guess or invent. Return null for a blank or unreadable value. "
-    "Never copy a value from one unit to another."
-)
+KEY_WHAT_YOU_SEE = key_what_you_see("NC")
 
 FORM_PROMPT = (
     "These are the two consecutive pages of ONE North Carolina DMV-349 Crash Report form (page 1 then page 2). "
@@ -172,11 +168,11 @@ FORM_PROMPT = (
     "Vehicle Make, Vehicle Year, 43 TAD (every code printed in the box, e.g. FD-2 or FC-2,FD-3), Insurance Company, Policy #. Owner and driver are different "
     "people unless the report shows otherwise. Read the VIN character by character. "
     "ADDRESSES. Return the street line in address_1 exactly as printed. If the street line also holds an "
-    "apartment, unit, suite or lot part (for example '2008 S MEBANE ST, APT,2022B'), return that part, "
+    "apartment, unit, suite or lot part (for example '100 N SAMPLE ST, APT,100B'), return that part, "
     "exactly as printed, in address_2 and keep only the street in address_1. "
     "PHONE NUMBERS. The driver's Home phone is printed 'H ( area code ) number'. Return the digits inside "
     "the parentheses as phone_area and the number after them as phone (for example phone_area '516', phone "
-    "'530-0635'). Never drop the area code. Do the same for the witness and property-owner Phone No. lines. "
+    "'555-0101'). Never drop the area code. Do the same for the witness and property-owner Phone No. lines. "
     "Ignore the work phone (W). "
 
     "PERSON TABLE (rows A-H at the bottom of page 1; the column numbers 21 to 32 are printed above it). Return one "

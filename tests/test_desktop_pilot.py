@@ -45,11 +45,5 @@ class CredentialTests(unittest.TestCase):
         text = (ROOT / "app/ui/server.py").read_text(encoding="utf-8")
         self.assertNotIn("OPENAI_API_KEY", text)
         self.assertIn('"/api/settings"', text)
-    def test_build_data_allowlist(self):
-        text = (ROOT / "build_exe.ps1").read_text(encoding="utf-8")
-        self.assertIn('"app/ui/static:app/ui/static"', text)
-        self.assertNotIn('"--add-data", ".', text)
-
-
 if __name__ == "__main__":
     unittest.main()

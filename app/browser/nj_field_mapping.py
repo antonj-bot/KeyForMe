@@ -10,12 +10,9 @@ UNIT_SECTION = "#section-page-base-owner-02"
 OTHER_SECTION = "#section-page-base-passenger-03"
 
 
-def person(name):
-    return f"[id^='Person_{name}-']:visible"
+from app.browser.selectors import person, vehicle
 
 
-def vehicle(name):
-    return f"[id^='Vehicle_{name}-']:visible"
 
 
 INCIDENT = {

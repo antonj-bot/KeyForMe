@@ -37,3 +37,10 @@ KeyForMe.spec
 
 .nc-backups/
 .pa-backups/
+
+# --- added by cleanup installer ---
+*.spec
+.env.*
+!.env.example
+*.py.bak
+.*-backups/

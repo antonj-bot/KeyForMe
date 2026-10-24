@@ -19,12 +19,9 @@ INCIDENT = {
 }
 
 
-def person(name):
-    return f"[id^='Person_{name}-']:visible"
+from app.browser.selectors import person, vehicle
 
 
-def vehicle(name):
-    return f"[id^='Vehicle_{name}-']:visible"
 
 
 OWNER = {

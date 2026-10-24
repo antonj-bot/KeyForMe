@@ -40,8 +40,14 @@ def save_key(value):
 
 def delete_key():
     vault = _vault()
-    if vault.get_password(SERVICE, ACCOUNT):
+    stored = vault.get_password(SERVICE, ACCOUNT) or ""
+    if stored:
         vault.delete_password(SERVICE, ACCOUNT)
+        # sync_environment() copies the stored key into OPENAI_API_KEY. Once the stored key is deleted that
+        # copy must go too, or the next sync_environment() mistakes it for a developer session key.
+        # A different key exported in the current session is left alone.
+        if os.environ.get("OPENAI_API_KEY", "").strip() == stored.strip():
+            os.environ.pop("OPENAI_API_KEY", None)
 
 
 def read_provider():

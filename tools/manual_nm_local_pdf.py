@@ -1,4 +1,4 @@
-﻿import functools
+import functools
 import http.server
 import os
 import threading
@@ -19,7 +19,7 @@ PDF_PATH = (
     / "pdfs"
     / "States"
     / "NM"
-    / "report-1335078161.pdf"
+    / "report-9000000003.pdf"
 )
 
 MOCK_DIR = ROOT / "mock" / "nm"
@@ -126,10 +126,7 @@ def main():
                 repr(payload.get("incident", {}).get("intersection_type")),
             )
             
-            warnings = fill_nm_form(
-                page,
-                payload,
-            )
+            warnings = fill_form(page, payload, state="NM", log=print)
 
             print(
                 f"Form filling: "

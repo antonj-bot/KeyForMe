@@ -511,16 +511,11 @@ def map_nj(raw: dict, *, today: date | None = None) -> dict:
         printed_driver = _has_name(dn)
         engine_hit_and_run = bool(v.get("hit_and_run"))      # the flag the shared engine reads
         if not printed_driver:
-            if v.get("hit_and_run") and v.get("parked"):
-                # Both boxes marked and no driver name: it is unclear which placeholder applies, so the
-                # last name is left blank (and the engine is told NOT to key HIT AND RUN) for the keyer.
-                engine_hit_and_run = False
-                notes.append(f"{label}: marked both Parked and Hit & Run with no driver name; "
-                             "driver last name left blank, key it by hand")
+            # Blank name: PARKED has priority over HIT AND RUN. A written name always wins.
+            if v.get("parked"):
+                dn["last_name"] = "PARKED"
             elif v.get("hit_and_run"):                     # General SOP, all states
                 dn["last_name"] = HIT_AND_RUN_NAME
-            elif v.get("parked"):
-                dn["last_name"] = "PARKED"
         charges = [text(c) for c in (v.get("charges") or []) if text(c)]
         driver = {
             **dn, **_address(d, f"{label} driver", notes),

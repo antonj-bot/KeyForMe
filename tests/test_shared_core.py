@@ -52,7 +52,7 @@ class Page:
 
 class CoreTests(unittest.TestCase):
     def test_blank_vin(self): self.assertFalse(should_attempt_vin_lookup(""))
-    def test_valid_format(self): self.assertTrue(should_attempt_vin_lookup("1HGCM82633A004352"))
+    def test_valid_format(self): self.assertTrue(should_attempt_vin_lookup("1F9TEST01KT000020"))
     def test_invalid_default_is_conservative(self): self.assertTrue(should_attempt_vin_lookup("SHORT"))
     def test_invalid_nonblocking(self):
         warnings=[]

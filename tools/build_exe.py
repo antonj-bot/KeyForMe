@@ -35,8 +35,33 @@ from pathlib import Path
 ENTRY = "run_web_ui.py"
 EXE_NAME = "KeyForMe"
 TEST_FILES = (
-    "tests/test_hit_and_run.py", "tests/test_nj_rules.py", "tests/test_nj_extractor.py",
-    "tests/test_nj_pipeline.py", "tests/test_dialogs.py", "tests/test_nj_form.py", "tests/test_rid_export.py",
+    "tests/test_hit_and_run.py",
+    "tests/test_nj_rules.py",
+    "tests/test_nj_extractor.py",
+    "tests/test_nj_pipeline.py",
+    "tests/test_dialogs.py",
+    "tests/test_nj_form.py",
+    "tests/test_rid_export.py",
+    "tests/test_selectors.py",
+    "tests/test_set_site.py",
+    "tests/test_build_exe.py",
+    "tests/test_form_engine.py",
+    "tests/test_ai_providers.py",
+    "tests/test_nm_completeness.py",
+    "tests/test_nm_mapping.py",
+    "tests/test_nc_rules.py",
+    "tests/test_nc_extractor.py",
+    "tests/test_nc_fixes.py",
+    "tests/test_nc_form.py",
+    "tests/test_pa_rules.py",
+    "tests/test_pa_extractor.py",
+    "tests/test_pa_form.py",
+    "tests/test_prompts.py",
+    "tests/test_ui_api.py",
+    "tests/test_build_data_allowlist.py",
+    "tests/test_desktop_pilot.py",
+    "tests/test_ca_parked.py",
+    "tests/test_parked_names.py",
 )
 SHARED_CORE_TEST = "tests/test_shared_core.py"
 

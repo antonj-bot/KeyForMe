@@ -7,6 +7,7 @@ import re
 from app.nm_models import NMReport
 
 from app.keying.nm_dropdowns import apply_nm_dropdowns
+from app.core.driver_rules import apply_placeholder_name
 
 
 def phone(raw: str | None) -> str:
@@ -198,4 +199,12 @@ def map_nm(report: NMReport) -> dict:
                 "sequence_fourth": u.sequence_fourth or "",
             },
         })
+    # Blank driver name: PARKED (parked mark, priority) or HIT AND RUN (hit-and-run mark). A printed name always wins.
+    # No notes are added here: NM filling is cancelled when the payload has notes.
+    for source, unit in zip(report.units, payload["units"]):
+        apply_placeholder_name(
+            unit["driver"],
+            bool(getattr(source, "parked_vehicle", None)),
+            bool(getattr(source, "hit_and_run", None)),
+        )
     return apply_nm_dropdowns(payload)

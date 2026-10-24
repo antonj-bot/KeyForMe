@@ -21,7 +21,7 @@ from app.rid_export.excel_writer import ExcelTarget, ExcelWriter, write_next_emp
 from app.rid_export.finder import find_text_in_all_pages
 from app.rid_export.text_utils import clean_rid_text
 
-RID_HTML = '<div id="formStatus"><div>Report Id: 1327309097</div><div>x</div></div>'
+RID_HTML = '<div id="formStatus"><div>Report Id: 9000000001</div><div>x</div></div>'
 TARGET = ExcelTarget("Book1.xlsx", "Sheet1")
 
 
@@ -126,10 +126,10 @@ def wait_for(predicate, timeout=3.0):
 
 # ---------------------------------------------------------------- pure logic
 @pytest.mark.parametrize("raw,expected", [
-    ("Report Id: 1327309097", "1327309097"),
-    ("report id:1327309097", "1327309097"),
+    ("Report Id: 9000000001", "9000000001"),
+    ("report id:9000000001", "9000000001"),
     ("  REPORT   ID:   55  ", "55"),
-    ("1327309097", "1327309097"),
+    ("9000000001", "9000000001"),
     ("", ""), (None, ""),
 ])
 def test_clean_rid_text(raw, expected):
@@ -497,7 +497,7 @@ def test_finder_main_page(browser_context):
     page = browser_context.new_page()
     page.set_content(f"<html><body>{RID_HTML}</body></html>")
     text, found = find_text_in_all_pages(browser_context, config.RID_SELECTOR)
-    assert text == "Report Id: 1327309097" and found is page
+    assert text == "Report Id: 9000000001" and found is page
     page.close()
 
 
@@ -505,7 +505,7 @@ def test_finder_inside_nested_iframes(browser_context):
     page = browser_context.new_page()
     page.set_content(nested(RID_HTML))
     text, found = find_text_in_all_pages(browser_context, config.RID_SELECTOR)
-    assert clean_rid_text(text) == "1327309097" and found is page
+    assert clean_rid_text(text) == "9000000001" and found is page
     page.close()
 
 
@@ -555,10 +555,10 @@ def test_end_to_end_hotkeys_to_excel(browser_context, monkeypatch):
     kb.pressed = set(); c.tick()
     c.hotkeys_enabled.set()
     kb.pressed = {"["}; c.tick()               # ON: left -> C, below the existing value
-    assert wait_for(lambda: sheet.Cells(11, 3).Value == "1327309097")
+    assert wait_for(lambda: sheet.Cells(11, 3).Value == "9000000001")
     kb.pressed = set(); c.tick()
     kb.pressed = {"]"}; c.tick()               # right -> I10
-    assert wait_for(lambda: sheet.Cells(10, 9).Value == "1327309097")
+    assert wait_for(lambda: sheet.Cells(10, 9).Value == "9000000001")
     assert rec.events == ["ok", "ok"]
     c.close()
     page.close()

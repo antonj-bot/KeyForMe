@@ -81,6 +81,8 @@ class NMUnit(BaseModel):
     sequence_second: str | None = None
     sequence_third: str | None = None
     sequence_fourth: str | None = None
+    parked_vehicle: bool | None = None   # the unit is marked PARKED / PARKED VEHICLE
+    hit_and_run: bool | None = None      # the unit is marked HIT AND RUN
 
 
 class NMPageExtraction(BaseModel):

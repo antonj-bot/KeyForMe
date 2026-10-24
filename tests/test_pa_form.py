@@ -234,7 +234,7 @@ def test_full_report_lands_in_the_right_fields(browser, payload):
         assert unit1["alcohol"] == "Unknown" and unit1["actions"] == "24;23"
         assert unit1["safety"] == "03" and unit1["ejection"] == "1" and unit1["ems"] == "NONE"
         assert (unit1["tag"], unit1["tagstate"], unit1["vin"], unit1["year"], unit1["make"], unit1["model"]) == \
-            ("NFL7193", "PA", "1HGCM56715A042022", "2005", "HONDA", "Accord")
+            ("NFL7193", "PA", "1F9TEST03KT000018", "2005", "HONDA", "Accord")
         assert unit1["impact"] == "Front" and unit1["failures"] == "01"
         assert unit1["towed"] == "1" and unit1["airbag"] == "1"
         assert unit1["violations"] == [

@@ -81,7 +81,7 @@ class InteractionTests(unittest.TestCase):
         from app.browser.vin_lookup import fill_vin
         panel=Mock(); controls=Mock(); panel.locator.return_value=controls; controls.count.return_value=1
         with patch("app.browser.vin_lookup.click_popup_ok",return_value=True) as popup, patch("app.browser.vin_lookup.field_has_value",return_value=True):
-            self.assertTrue(fill_vin(Mock(),panel,{"vin":"1HGCM82633A004352"},1,NM,[]))
+            self.assertTrue(fill_vin(Mock(),panel,{"vin":"1F9TEST01KT000020"},1,NM,[]))
             popup.assert_called_once()
     def test_exact_dropdown_rejects_unmatched(self):
         from app.browser.controls import fill_control

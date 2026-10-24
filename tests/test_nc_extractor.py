@@ -28,10 +28,10 @@ def as_form(raw: dict, **over) -> ex.NCFormExtraction:
     d["margin_boxes"] = [{"box": k, "value": v} for k, v in d["margin_boxes"].items()]
     d.pop("notes", None)
     d.update({"form_rev": "1/2009", "form_number": 1, "form_total": 1, "units_involved": 2,
-              "witnesses": [{"name": "TARA NICOLE THOMAS", "address_1": "110 ALEO 9TH AVE", "city": "ROCKINGHAM",
+              "witnesses": [{"name": "TESTFOUR MIDDLED SAMPLEFOUR", "address_1": "400 SAMPLE 9TH AVE", "city": "ROCKINGHAM",
                              "state": "NC", "zip": "28379"}],
-              "property_owners": [{"name": "STEVE WATKINS", "description": "FENCE/HOUSE",
-                                   "address_1": "127 ALEO NINTH AVE", "city": "ROCKINGHAM", "state": "NC", "zip": "28379"}]})
+              "property_owners": [{"name": "TESTFIVE SAMPLEFIVE", "description": "FENCE/HOUSE",
+                                   "address_1": "500 SAMPLE NINTH AVE", "city": "ROCKINGHAM", "state": "NC", "zip": "28379"}]})
     d.update(over)
     return ex.NCFormExtraction.model_validate(d)
 
@@ -53,7 +53,7 @@ def test_extractor_schema_feeds_map_nc_without_drift():
     assert p["incident"] == q["incident"]
     assert p["units"] == q["units"]
     assert {o["role"] for o in p["other_parties"]} == {"WITNESS", "PROPERTY OWNER"}
-    assert next(o for o in p["other_parties"] if o["role"] == "PROPERTY OWNER")["last_name"] == "WATKINS"
+    assert next(o for o in p["other_parties"] if o["role"] == "PROPERTY OWNER")["last_name"] == "SAMPLEFIVE"
 
 
 def test_unit_count_gate():

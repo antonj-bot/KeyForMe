@@ -186,17 +186,17 @@ def test_a_vehicle_that_is_not_hit_and_run_never_gets_the_placeholder():
     assert out["units"][0]["hit_and_run"] is False and out["incident"]["hit_and_run"] == ""
 
 
-def test_parked_and_hit_and_run_together_with_no_name_leaves_the_last_name_blank():
+def test_parked_wins_over_hit_and_run_when_both_are_marked_and_there_is_no_name():
     from app.core.driver_rules import apply_hit_and_run_name
     raw = hr_raw()
-    raw["vehicles"][1]["parked"] = True
+    raw["vehicles"][1]["parked"] = True                    # unit 2 is marked Parked AND Hit & Run, no driver name
     out = nj.map_nj(raw, today=TODAY)
-    assert out["units"][1]["driver"]["last_name"] == ""                                       # not PARKED, not HIT AND RUN
-    assert out["units"][1]["hit_and_run"] is False                                            # so the shared engine rule stays off
-    assert out["incident"]["hit_and_run"] == "1"                                              # the incident checkbox is still ticked
-    assert any("both Parked and Hit & Run" in n and "left blank" in n for n in out["notes"])
-    result, changed = apply_hit_and_run_name(out)                                             # what the engine does with this payload
-    assert changed == [] and result["units"][1]["driver"]["last_name"] == ""
+    driver = out["units"][1]["driver"]
+    assert driver["last_name"] == "PARKED"                  # PARKED has priority over HIT AND RUN
+    assert driver["first_name"] == "" and driver["middle_name"] == ""
+    assert not any("both Parked" in n or "marked both" in n for n in out["notes"])
+    _payload, changed = apply_hit_and_run_name(out)         # the shared engine rule must not overwrite PARKED
+    assert changed == []
 
 
 def test_parked_and_hit_and_run_with_a_printed_name_keys_the_name():
@@ -280,9 +280,9 @@ def test_address_helpers():
 
 # ------------------------------------------------------------ vehicle helpers
 def test_vin_follows_general_sop_letters_only():
-    assert nj.fix_vin("1GNEVGRS3SJ260580") == "1GNEVGRS3SJ260580"
-    assert nj.fix_vin("1gnevgrs3sj26o58q") == "1GNEVGRS3SJ260580"
-    assert nj.fix_vin(" wmw sy3c59et 566252 ") == "WMWSY3C59ET566252"
+    assert nj.fix_vin("1F9TEST05KT090000") == "1F9TEST05KT090000"
+    assert nj.fix_vin("1f9test05kt09o00q") == "1F9TEST05KT090000"
+    assert nj.fix_vin(" 1f9 test03kt 000004 ") == "1F9TEST03KT000004"
     assert nj.fix_vin("NONE") == "" and nj.fix_vin("-") == "" and nj.fix_vin(None) == ""
 
 
@@ -339,12 +339,12 @@ def make_raw():
             fx.veh(1, ins="000", policy="P-1", charges=["39:4-88B FAILED TO MAINTAIN LANE", "39:3-10 UNLICENSED DRIVER"],
                    driver_=fx.driver("ANA", "", "ROE", "12/24/89", "D123", "NY", "No", "1 MAIN ST APT 2", "UTICA", "NY", "13502"),
                    owner_=fx.owner("ANA ROE", same=True, a1="1 MAIN ST APT 2", city="UTICA", state="NY", zip="13502"),
-                   vehicle_=fx.vehicle("1GNEVGRS3SJ26O58Q", "2025", "CHEVROLET", "TRAVERSE", "ABC1", "NY"),
+                   vehicle_=fx.vehicle("1F9TEST05KT09O00Q", "2025", "CHEVROLET", "TRAVERSE", "ABC1", "NY"),
                    removal=dict(towed_disabled=True), damage_new="09", damage_old="03", contributing=["60", "-"]),
             fx.veh(2, hit_and_run=True, ins="***", narr_ins="STATE FARM",
                    driver_=fx.driver("BEN", "T", "POE", dl="NONE", alcohol=""),
                    owner_=fx.owner("BEN POE", a1="2 ELM ST", city="PEARL RIVER", state="NY", zip="10965"),
-                   vehicle_=fx.vehicle("WMWSY3C59ET566252", "2014", "MINI", "COOPER", "KYN5066", "NY"),
+                   vehicle_=fx.vehicle("1F9TEST03KT000004", "2014", "MINI", "COOPER", "KYN5066", "NY"),
                    removal=dict(driven=True), damage_new="12", damage_old="06", contributing=["25", "-"]),
             fx.veh(3, parked=True,
                    driver_=fx.driver(alcohol="No"),
@@ -399,7 +399,7 @@ def test_unit_1(out):
     assert (u["owner"]["first_name"], u["owner"]["last_name"]) == ("ANA", "ROE")      # Same As Driver: names only
     assert u["owner"]["address_1"] == "1 MAIN ST"                                      # owner address as printed
     v = u["vehicle"]
-    assert v["vin"] == "1GNEVGRS3SJ260580"                                            # O and Q replaced
+    assert v["vin"] == "1F9TEST05KT090000"                                            # O and Q replaced
     assert v["insurance_carrier"] == "000" and v["vehicle_towed"] == "YES" and v["airbag_deployed"] == "YES"
     assert v["contributing"] == "60" and v["impact_location"] == "Left Side"
 
@@ -653,7 +653,7 @@ def test_four_unit_report():
     assert u2["driver"]["address_1"] == "63 ELMWOOD AVE" and u2["driver"]["address_2"] == "2ND FL"
     assert (u3["driver"]["last_name"], u4["driver"]["last_name"]) == ("PARKED", "PARKED")
     assert u3["driver"]["drivers_license"] == "NONE" and u4["driver"]["drivers_license"] == ""   # printed NONE is keyed
-    assert (u3["owner"]["first_name"], u3["owner"]["last_name"]) == ("THOMAS", "MERRITT")
+    assert (u3["owner"]["first_name"], u3["owner"]["last_name"]) == ("SAMPLEFOUR", "MERRITT")
     assert u3["owner"]["address_2"] == "APT. 4A" and u3["vehicle"]["impact_location"] == "Left Front"
     assert u4["vehicle"]["impact_location"] == "Right Rear" and u4["vehicle"]["vehicle_towed"] == "NO"
     assert u3["vehicle"]["airbag_deployed"] == "" and u3["vehicle"]["insurance_carrier"] == "945"

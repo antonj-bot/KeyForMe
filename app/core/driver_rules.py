@@ -64,3 +64,31 @@ def apply_hit_and_run_name(payload):
         driver["last_name"] = HIT_AND_RUN_NAME
         changed.append(unit.get("party_number") or i + 1)
     return result, changed
+
+
+PARKED_NAME = "PARKED"
+
+
+def placeholder_last_name(driver, parked=False, hit_and_run=False) -> str:
+    """The placeholder to key in the driver's LAST name, or "" when none applies.
+    A printed name always wins (key what you see). With first, middle and last name all blank:
+    the parked-vehicle mark has priority (PARKED), then the hit-and-run mark (HIT AND RUN)."""
+    if has_driver_name(driver):
+        return ""
+    if is_flagged(parked):
+        return PARKED_NAME
+    if is_flagged(hit_and_run):
+        return HIT_AND_RUN_NAME
+    return ""
+
+
+def apply_placeholder_name(driver, parked=False, hit_and_run=False) -> str:
+    """Key the placeholder into `driver` (a dict, changed in place). Returns the word keyed, or "".
+    A leftover "-" in first / middle name is cleared; a printed name is never touched."""
+    word = placeholder_last_name(driver, parked, hit_and_run)
+    if word and isinstance(driver, dict):
+        for key in ("first_name", "middle_name"):
+            if key in driver:
+                driver[key] = ""
+        driver["last_name"] = word
+    return word

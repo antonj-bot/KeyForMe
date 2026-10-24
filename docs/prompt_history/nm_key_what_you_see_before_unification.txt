@@ -1,0 +1,1 @@
+KEY WHAT YOU SEE. Transcribe values exactly as printed, including misspellings, punctuation, capitalization, identifiers, leading zeros, VIN characters, and insurance-carrier spelling. Never correct, normalize, guess, or invent source values. Return null when a value is blank or unreadable. Do not copy values between traffic units.

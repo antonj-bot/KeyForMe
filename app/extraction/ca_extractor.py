@@ -18,19 +18,9 @@ from app.models import (
     Party,
     PartyColumns,
 )
+from app.extraction.prompts import key_what_you_see
 
-RULES = (
-    "KEY WHAT YOU SEE. Transcribe exactly as printed, including "
-    "misspellings, abbreviations, capitalization, punctuation, "
-    "periods, ellipses, and leading zeros. "
-    "Never correct, normalize, guess, or invent source values. "
-    "Read each field from its printed label and physical location. "
-    "Never copy information between parties. "
-    "For checkboxes, use only visibly marked selections. "
-    "Return null for blank or unreadable fields. "
-    "Report uncertain values in warnings. "
-    "Dates: MM/DD/YYYY. Times: HH:MM."
-)
+RULES = key_what_you_see("CA")
 
 CLASSIFY_PROMPT = (
     "Classify this single page from a California police-report PDF. "
@@ -67,6 +57,12 @@ PAGE1_PROMPT = (
 
     "Preserve insurance carrier spelling exactly. "
     "Read the marked vehicle damage description exactly. "
+    "In the narrow strip at the left edge of each party block, set parked_vehicle to true ONLY if the small "
+    "checkbox that belongs to the label PARKED VEHICLE holds a visible mark (X, check or fill). Never take it "
+    "from the neighbouring DRIVER, PEDESTRIAN, BICYCLIST, OTHER or OPERATOR boxes. If that box is blank set "
+    "false; if it is unclear set false and say so in warnings. "
+    "Read the driver name exactly as printed and return null when the name box is blank. "
+    "Never write PARKED or HIT AND RUN yourself. "
 
     "If this is not a California CHP 555 party page, "
     "set is_california_chp555 to false. "

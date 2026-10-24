@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import sys
 import time
@@ -20,7 +20,7 @@ def main() -> None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     no_fill = "--no-fill" in sys.argv
     if not args:
-        raise SystemExit('Usage: python -m tests.test_local_pdf "path\\to\\report.pdf" [--no-fill]')
+        raise SystemExit('Usage: python -m tools.manual_local_pdf "path\\to\\report.pdf" [--no-fill]')
 
     pdf_path = Path(args[0]).expanduser().resolve()
     if not pdf_path.is_file():

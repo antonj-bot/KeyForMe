@@ -41,13 +41,7 @@ UNIT_INVENTORY_PROMPT = (
     "Do not extract names, addresses, VINs or other personal fields."
 )
 
-KEY_WHAT_YOU_SEE = (
-    "KEY WHAT YOU SEE. Transcribe values exactly as printed, including "
-    "misspellings, punctuation, capitalization, identifiers, leading zeros, "
-    "VIN characters, and insurance-carrier spelling. Never correct, normalize, "
-    "guess, or invent source values. Return null when a value is blank or "
-    "unreadable. Do not copy values between traffic units."
-)
+from app.extraction.prompts import KEY_WHAT_YOU_SEE
 
 NM_EXTRACTION_RULES = (
     "Extract the case number separately from the crash report number. "
@@ -77,6 +71,14 @@ NM_EXTRACTION_RULES = (
     "'BLOWING SAND, SOIL, DIRT'. "
     "Include only explicitly selected or printed values; "
     "do not infer additional conditions from the narrative. "
+)
+NM_EXTRACTION_RULES += (
+    "For each traffic unit set parked_vehicle to true ONLY if the report marks THAT unit as a parked vehicle "
+    "(a checkbox or entry labeled PARKED or PARKED VEHICLE that belongs to that unit has a visible mark); "
+    "set hit_and_run to true ONLY if THAT unit's own Hit and Run box or entry has a visible mark. "
+    "Otherwise return null for both. Never take a mark from a neighbouring box or from another unit. "
+    "Read the driver name exactly as printed and return null for a blank name; "
+    "never write PARKED or HIT AND RUN yourself. "
 )
 
 

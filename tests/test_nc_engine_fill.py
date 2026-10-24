@@ -106,7 +106,7 @@ def full_raw():
           "driver": {"first": "PAT", "middle": "", "last": "KIM", "address_1": "9 OAK ST", "city": "RALEIGH",
                      "state": "NC", "zip": "27601", "dob": "01/02/1990"}}
     raw["units"].append(u3)
-    raw["units"][2]["vehicle"] = {**u3["vehicle"], "vin": "1HGCM82633A004352", "plate": "KIM123", "tad": "LD-3"}
+    raw["units"][2]["vehicle"] = {**u3["vehicle"], "vin": "1F9TEST01KT000020", "plate": "KIM123", "tad": "LD-3"}
     return raw
 
 
@@ -188,7 +188,7 @@ def test_engine_and_extras_fill_the_nc_form(page):
     assert val(u1, spec.driver["alcohol_drugs"]) == "1" and val(u1, spec.driver["contributing"]) == "8"
     assert val(u1, spec.driver["protection"]) == "2" and val(u1, spec.driver["ejection"]) == "1"   # table row A
     assert val(u1, spec.driver["ems_to"]) == ""                                   # EMS went to passenger C
-    assert val(u1, spec.vehicle["vin"]) == "1GNSCJE0XDR157820" and val(u1, spec.vehicle["impact_location"]) == "Front"
+    assert val(u1, spec.vehicle["vin"]) == "1F9TEST08KT000001" and val(u1, spec.vehicle["impact_location"]) == "Front"
     assert val(u1, spec.vehicle["vehicle_defects"]) == "0" and val(u1, spec.vehicle["speed_limit"]) == "35"
     assert val(u1, M.VEHICLE["tag_state"]) == "SC" and val(u1, M.VEHICLE["policy_number"]) == "11408925685"
     assert u1.locator("input[type='radio'][id^='Vehicle_VehicleTowed-'][value='1']").is_checked()      # rotation tow
@@ -207,7 +207,7 @@ def test_engine_and_extras_fill_the_nc_form(page):
     assert val(u2, spec.vehicle["impact_location"]) == "Right Rear" and val(u2, spec.vehicle["speed_limit"]) == "0"
 
     u3 = panels(page, spec.unit_section, 3)
-    assert val(u3, spec.driver["last_name"], 1) == "KIM" and val(u3, spec.vehicle["vin"]) == "1HGCM82633A004352"
+    assert val(u3, spec.driver["last_name"], 1) == "KIM" and val(u3, spec.vehicle["vin"]) == "1F9TEST01KT000020"
     assert val(u3, spec.vehicle["impact_location"]) == "Left Side"
 
     u4 = panels(page, spec.unit_section, 4)                                       # untouched tab: nothing leaked

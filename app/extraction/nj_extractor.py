@@ -33,14 +33,9 @@ from app.nj_models import (
     NJUnitPage,
     NJVehicleRaw,
 )
+from app.extraction.prompts import key_what_you_see
 
-KEY_WHAT_YOU_SEE = (
-    "KEY WHAT YOU SEE. Transcribe values exactly as printed, including misspellings, "
-    "capitalization, punctuation, leading zeros and VIN characters. Never correct, "
-    "normalize, guess or invent a value. A dash, a row of dashes or a blank box means "
-    "no value: return null (an empty list for lists). Do not copy values between "
-    "vehicles or between people. Put anything unreadable or doubtful in warnings."
-)
+KEY_WHAT_YOU_SEE = key_what_you_see("NJ")
 
 CLASSIFY_PROMPT = (
     "This is the top part of one page of a New Jersey police crash report PDF. Return exactly "
@@ -85,7 +80,7 @@ UNIT_PAGE_PROMPT = (
     "and 119b. Set form_shows_box_134 = true only if the right margin prints a box numbered "
     "134. Read each code from beside its own number; never take it from a neighbouring box. "
     "EACH VEHICLE: number = field 23/53; side = LEFT or RIGHT; parked and hit_and_run = true "
-    "only if that vehicle's own checkbox has an X; policy_number = field 24/54; ins_code = "
+    "only if that vehicle's own checkbox has an X (the row of small checkboxes just above the driver's name holds Parked, Ped, Pedalcyclist, Resp. to Emergency and Hit & Run; each box belongs to the label printed beside it, so never take Parked or Hit & Run from a neighbouring box); policy_number = field 24/54; ins_code = "
     "'NJ Ins. Code' field 25/55 (an asterisk is returned as '*'). "
     "Driver: first, middle (the Initial box), last, dob (field 33/63), license number, "
     "license state, street (Number & Street), city, state, zip (read City, State and Zip "

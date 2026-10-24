@@ -17,7 +17,7 @@ def sample_raw() -> dict:
              "owner": {"first": "LESVIN", "middle": "GEOVANY", "last": "GONZALEZ PEREZ", "suffix": "",
                        "same_as_driver": False, "address_1": "161 MORROW STREET", "city": "ROCKINGHAM",
                        "state": "NC", "zip": "28379"},
-             "vehicle": {"plate": "XXA169", "plate_state": "SC", "vin": "1GNSCJE0XDR157820", "year": "2027",
+             "vehicle": {"plate": "XXA169", "plate_state": "SC", "vin": "1F9TEST08KT000001", "year": "2027",
                          "make": "CHEV", "tad": "FD-2", "insurance_company": "AMERICAN",
                          "policy_number": "11408925685", "towed_by": "WATSON'S/ ROTATION/WATSON'S/ ROTATION",
                          "defects": "0", "speed_limit": "35"},
@@ -27,7 +27,7 @@ def sample_raw() -> dict:
              "owner": {"first": "LEE", "middle": "GERALD", "last": "RAINWATER", "same_as_driver": False,
                        "address_1": "155 ENTWISTLE THIRD ST", "city": "ROCKINGHAM", "state": "NC",
                        "zip": "283794771"},
-             "vehicle": {"plate": "NZJ7202", "plate_state": "NC", "vin": "5TBBT44121S154498", "year": "2001",
+             "vehicle": {"plate": "NZJ7202", "plate_state": "NC", "vin": "1F9TEST0XKT000002", "year": "2001",
                          "make": "TOYT", "tad": "BR-1", "insurance_company": "INTEGON PREFERRED INSURANCE COMPANY",
                          "policy_number": "2034780977", "towed_by": "STAYED ON SCENE/STAYED ON SCENE",
                          "defects": "0", "speed_limit": "0"},
@@ -41,8 +41,8 @@ def sample_raw() -> dict:
             {"name": "LESVIN GEOVANY GONZALES PEREZ", "charge": "Y0335457-1 - DRIVING WHILE IMPAIRED"},
             {"name": "LESVIN GEOVANY GONZALES PEREZ", "charge": "HIT AND RUN/ NO OPERATOR'S LICENSE FAILURE TO"},
         ],
-        "witnesses": [{"name": "TARA NICOLE THOMAS", "address_line": "110 ALEO 9TH AVE, ROCKINGHAM, NC 28379"}],
-        "property_owners": [{"name": "STEVE WATKINS", "address_1": "127 ALEO NINTH AVE", "city": "ROCKINGHAM",
+        "witnesses": [{"name": "TESTFOUR MIDDLED SAMPLEFOUR", "address_line": "400 SAMPLE 9TH AVE, ROCKINGHAM, NC 28379"}],
+        "property_owners": [{"name": "TESTFIVE SAMPLEFIVE", "address_1": "500 SAMPLE NINTH AVE", "city": "ROCKINGHAM",
                              "state": "NC", "zip": "28379"}],
     }
 

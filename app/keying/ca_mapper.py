@@ -287,15 +287,43 @@ def cited_value(raw) -> str:
     return ""
 
 
+def _marked(raw) -> bool:
+    """A report-level mark. False, blank, NO, N, 0 and NONE are NOT marks; anything else printed is."""
+    if isinstance(raw, str):
+        return raw.strip().upper() not in {"", "NO", "N", "0", "FALSE", "NONE", "N/A", "NA", "NOT MARKED"}
+    return bool(raw)
+
+
 def hit_and_run(report) -> bool:
-    return bool(value(report.report.felony_hit_and_run)
-                or value(report.report.misdemeanor_hit_and_run))
+    return (_marked(value(report.report.felony_hit_and_run))
+            or _marked(value(report.report.misdemeanor_hit_and_run)))
+
+
+# A name box that holds only a placeholder word is keyed in LAST name, exactly like a blank one would be.
+PLACEHOLDER_NAME = re.compile(
+    r"^(?:PARKED(?:\s+(?:VEHICLE|VEH\.?|CAR|UNOCCUPIED))?|HIT\s*(?:AND|&|/|N)\s*RUN)\.?$", re.I)
+
+
+def driver_name_fields(reported_name, parked: bool, hit_and_run_flag: bool) -> dict:
+    """Key what is written. Only a BLANK name box gets a placeholder:
+    PARKED (parked-vehicle box marked) has priority, then HIT AND RUN (the report is a hit and run)."""
+    name = " ".join(str(reported_name or "").split())
+    if name and not PLACEHOLDER_NAME.match(name):
+        return split_name_111(name)
+    names = split_name_111("")
+    if name:
+        names["last_name"] = name
+    elif parked:
+        names["last_name"] = "PARKED"
+    elif hit_and_run_flag:
+        names["last_name"] = "HIT AND RUN"
+    return names
 
 
 def has_vehicle_data(party) -> bool:
     fields = (party.driver_name, party.driver_license_number,
               party.license_plate, party.vin, party.vehicle_make)
-    return any(text(f) for f in fields)
+    return any(text(f) for f in fields) or bool(getattr(party, "parked_vehicle", False))
 
 
 # ---------- injured / witness / passengers
@@ -443,9 +471,10 @@ def map_owner(party, driver: dict, notes: list) -> dict:
 def map_party(report, party, notes: list) -> dict:
     n = party.party_number
     reported_name = text(party.driver_name)
-    names = split_name_111(reported_name)
-    if hit_and_run(report) and not reported_name:
-        names["last_name"] = "HIT AND RUN"
+    parked = bool(value(getattr(party, "parked_vehicle", False)))
+    names = driver_name_fields(reported_name, parked, hit_and_run(report))
+    if parked and not reported_name:
+        notes.append(f"Unit {n}: driver name is blank and the parked-vehicle box is marked; keyed PARKED.")
 
     injured = next((p for p in report.people if is_injured_driver(p, n)), None)
     address = address_fields(

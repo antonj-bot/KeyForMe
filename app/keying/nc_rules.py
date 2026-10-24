@@ -35,7 +35,7 @@ Raw input (what app/extraction/nc_extractor.py returns; values as printed)
                  "protection": "0", "airbag": "2", "ejection": "1", "injury": "5"}],   # 27, 28, 31, 32
   "charges": [{"name": "LESVIN GEOVANY GONZALES PEREZ", "charge": "Y0335457-1 - DRIVING WHILE IMPAIRED"}],
   "witnesses": [{"name": "", "address_line": "", "phone": ""}],
-  "property_owners": [{"name": "STEVE WATKINS", "address_line": "", "phone": ""}]
+  "property_owners": [{"name": "TESTFIVE SAMPLEFIVE", "address_line": "", "phone": ""}]
 }
 
 Output payload keys follow the NJ payload: incident / units / other_parties / notes.
@@ -353,10 +353,10 @@ def nc_dob(value) -> str:
 
 # ----------------------------------------------------------------- phone numbers
 def nc_phone(number, area=None) -> str:
-    """Home phone as printed, area code first: '516 530-0635'.
-    The report prints 'H ( 516 ) 530-0635'. The extractor returns the part in the parentheses as `area` and the
+    """Home phone as printed, area code first: '516 555-0101'.
+    The report prints 'H ( 516 ) 555-0101'. The extractor returns the part in the parentheses as `area` and the
     rest as `number`; a complete number in `number` (any common format) is accepted too. Only 7 digits and no
-    area code -> '530-0635'. Anything that is not a plain 7/10-digit phone (an extension...) is kept as printed.
+    area code -> '555-0101'. Anything that is not a plain 7/10-digit phone (an extension...) is kept as printed.
     Redacted or null -> ''."""
     n, a = nc_text(number), nc_text(area)
     if not n:
@@ -389,8 +389,8 @@ _NC_UNIT_RE = re.compile(
 
 
 def nc_split_unit(address_1) -> tuple[str, str]:
-    """'2008 S MEBANE ST, APT,2022B' -> ('2008 S MEBANE ST', 'APT,2022B'). The unit part is kept exactly as printed.
-    The shared splitter misses 'APT,2022B' (a comma straight after APT). A street that merely contains a unit word
+    """'100 N SAMPLE ST, APT,100B' -> ('100 N SAMPLE ST', 'APT,100B'). The unit part is kept exactly as printed.
+    The shared splitter misses 'APT,100B' (a comma straight after APT). A street that merely contains a unit word
     ('12 LOT ST', '100 PARK FL') and a state-and-zip tail ('FL 33101') are left alone."""
     t = _s(address_1)
     m = _NC_UNIT_RE.match(t)

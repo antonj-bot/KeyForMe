@@ -45,6 +45,7 @@ class PartyPage1(BaseModel):
     driver_license_state: Value
     driver_license_class: Value
     driver_name: Value
+    parked_vehicle: bool = False   # the PARKED VEHICLE box in the party strip
     street_address: Value
     city_state_zip: Value
     driver_city: Value

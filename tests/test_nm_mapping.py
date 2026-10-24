@@ -11,7 +11,7 @@ def test_split_unit_across_pages_and_owner_phone():
     )
     second = NMPageExtraction(units=[NMUnit(
         unit_number=2, owner_first_name="OWNER", owner_phone="(760) 221-5512",
-        insurance_carrier="USAA", vin="WAUAUGFF7LA040097",
+        insurance_carrier="USAA", vin="1F9TEST07KT000023",
     )])
     payload = map_nm(merge_pages([first, second]))
     assert payload["incident"]["time_2400"] == "08:04"
@@ -19,7 +19,7 @@ def test_split_unit_across_pages_and_owner_phone():
     assert payload["units"][0]["owner"]["home_phone"] == "505 353-7699"
     assert payload["units"][1]["owner"]["home_phone"] == "760 221-5512"
     assert payload["units"][1]["driver"]["city"] == "RIO RANCHO"
-    assert payload["units"][1]["vehicle"]["vin"] == "WAUAUGFF7LA040097"
+    assert payload["units"][1]["vehicle"]["vin"] == "1F9TEST07KT000023"
 
 
 def test_conflicts_are_flagged_not_overwritten():
